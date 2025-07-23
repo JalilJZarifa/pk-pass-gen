@@ -7,6 +7,8 @@ const path = require('path');
 const sharp = require('sharp');
 const { createWorker } = require('tesseract.js');
 const jsQR = require('jsqr');
+const Quagga = require('quagga').default;
+const BarcodeReader = require('javascript-barcode-reader');
 
 // Configuration
 const config = {
@@ -22,7 +24,7 @@ const bot = new TelegramBot(config.TELEGRAM_BOT_TOKEN, { polling: true });
 const app = express();
 const db = new sqlite3.Database(config.DATABASE_PATH);
 
-console.log('🤖 Arsenal Ticket Bot Starting... (Enhanced with Professional Barcode Scanning!)');
+console.log('🤖 Arsenal Ticket Bot Starting... (Enhanced with QuaggaJS Professional Barcode Scanning!)');
 console.log('👥 Admins:', config.ADMIN_IDS);
 
 // Database setup
@@ -101,61 +103,62 @@ function logMessage(userId, messageText, messageType = 'text') {
            [userId, messageText, messageType]);
 }
 
-// Enhanced barcode scanning function with multiple methods
+// ========== ENHANCED BARCODE SCANNING FUNCTIONS ==========
+
+// Enhanced barcode scanning with multiple libraries
 async function scanBarcodeFromImage(imageBuffer) {
     try {
-        console.log('🔍 Starting professional barcode scan...');
+        console.log('🔍 Starting multi-library barcode scan...');
         
-        // Convert image to various formats for better scanning
-        const processedImages = await Promise.all([
-            // Original image
-            sharp(imageBuffer).png().toBuffer(),
-            // High contrast version
-            sharp(imageBuffer).normalize().sharpen().png().toBuffer(),
-            // Grayscale with increased contrast
-            sharp(imageBuffer).grayscale().normalize().modulate({ brightness: 1.2, contrast: 1.5 }).png().toBuffer(),
-            // Inverted colors (white text on black background)
-            sharp(imageBuffer).negate().png().toBuffer(),
-            // Enhanced version with edge detection
-            sharp(imageBuffer).grayscale().normalize().sharpen({ sigma: 1.5 }).png().toBuffer()
-        ]);
-
-        // Try scanning each processed image variant
-        for (let i = 0; i < processedImages.length; i++) {
-            console.log(`🔍 Scanning image variant ${i + 1}/5...`);
-            
-            try {
-                // Method 1: QR Code scanning with jsQR
-                const { data, info } = await sharp(processedImages[i]).raw().toBuffer({ resolveWithObject: true });
-                const qrResult = jsQR(new Uint8ClampedArray(data), info.width, info.height);
-                
-                if (qrResult) {
-                    console.log('✅ QR Code detected:', qrResult.data);
-                    return {
-                        type: 'QR_CODE',
-                        data: qrResult.data,
-                        method: `QR Scanner (variant ${i + 1})`
-                    };
-                }
-
-                // Method 2: OCR-based barcode text extraction
-                const ocrResult = await performOCROnImage(processedImages[i]);
-                if (ocrResult && ocrResult.length >= 10) {
-                    console.log('✅ Barcode text extracted via OCR:', ocrResult);
-                    return {
-                        type: 'BARCODE_OCR',
-                        data: ocrResult,
-                        method: `OCR Scanner (variant ${i + 1})`
-                    };
-                }
-
-            } catch (error) {
-                console.log(`❌ Variant ${i + 1} scan failed:`, error.message);
-                continue;
-            }
+        // Method 1: QuaggaJS (Most reliable for traditional barcodes)
+        const quaggaResult = await scanWithQuagga(imageBuffer);
+        if (quaggaResult) {
+            return {
+                type: 'BARCODE',
+                data: quaggaResult.code,
+                format: quaggaResult.format,
+                method: 'QuaggaJS Scanner'
+            };
         }
 
-        console.log('❌ No barcode found in any image variant');
+        // Method 2: javascript-barcode-reader
+        const jsBarcodeResult = await scanWithJavaScriptBarcodeReader(imageBuffer);
+        if (jsBarcodeResult) {
+            return {
+                type: 'BARCODE',
+                data: jsBarcodeResult.code,
+                format: jsBarcodeResult.format,
+                method: 'JavaScript Barcode Reader'
+            };
+        }
+
+        // Method 3: jsQR for QR codes
+        const qrResult = await scanWithJsQR(imageBuffer);
+        if (qrResult) {
+            return {
+                type: 'QR_CODE',
+                data: qrResult,
+                method: 'jsQR Scanner'
+            };
+        }
+
+        // Method 4: Enhanced OCR with barcode patterns
+        const ocrResult = await performBarcodeOCR(imageBuffer);
+        if (ocrResult) {
+            return {
+                type: 'BARCODE_OCR',
+                data: ocrResult,
+                method: 'Enhanced OCR Scanner'
+            };
+        }
+
+        // Method 5: Try image variants if all else fails
+        const variantResult = await scanImageVariants(imageBuffer);
+        if (variantResult) {
+            return variantResult;
+        }
+
+        console.log('❌ No barcode found with any method');
         return null;
 
     } catch (error) {
@@ -164,32 +167,212 @@ async function scanBarcodeFromImage(imageBuffer) {
     }
 }
 
-// OCR function optimized for barcode text extraction
-async function performOCROnImage(imageBuffer) {
+// QuaggaJS Implementation (Best for traditional barcodes)
+async function scanWithQuagga(imageBuffer) {
+    return new Promise((resolve) => {
+        try {
+            // Process image for QuaggaJS
+            sharp(imageBuffer)
+                .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
+                .grayscale()
+                .normalize()
+                .png()
+                .toBuffer()
+                .then(processedBuffer => {
+                    // Save temporarily for QuaggaJS (it needs file path)
+                    const tempDir = path.join(__dirname, 'temp');
+                    const tempPath = path.join(tempDir, `barcode_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.png`);
+                    
+                    // Ensure temp directory exists
+                    if (!fs.existsSync(tempDir)) {
+                        fs.mkdirSync(tempDir, { recursive: true });
+                    }
+                    
+                    fs.writeFileSync(tempPath, processedBuffer);
+
+                    Quagga.decodeSingle({
+                        decoder: {
+                            readers: [
+                                "code_128_reader",
+                                "ean_reader", 
+                                "ean_8_reader",
+                                "code_39_reader",
+                                "code_39_vin_reader",
+                                "codabar_reader",
+                                "upc_reader",
+                                "upc_e_reader",
+                                "i2of5_reader",
+                                "2of5_reader",
+                                "code_93_reader"
+                            ]
+                        },
+                        locate: true, // Enable barcode localization
+                        numOfWorkers: 0, // Required for Node.js
+                        src: tempPath
+                    }, function(result) {
+                        // Clean up temp file
+                        try {
+                            fs.unlinkSync(tempPath);
+                        } catch (e) {
+                            console.log('Could not delete temp file:', e.message);
+                        }
+                        
+                        if (result && result.codeResult) {
+                            console.log('✅ QuaggaJS detected barcode:', result.codeResult.code);
+                            resolve({
+                                code: result.codeResult.code,
+                                format: result.codeResult.format
+                            });
+                        } else {
+                            console.log('❌ QuaggaJS: No barcode detected');
+                            resolve(null);
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('QuaggaJS processing error:', error);
+                    resolve(null);
+                });
+        } catch (error) {
+            console.error('QuaggaJS error:', error);
+            resolve(null);
+        }
+    });
+}
+
+// JavaScript Barcode Reader Implementation  
+async function scanWithJavaScriptBarcodeReader(imageBuffer) {
+    try {
+        // Convert image to format expected by javascript-barcode-reader
+        const { data, info } = await sharp(imageBuffer)
+            .resize(400, 300, { fit: 'inside', withoutEnlargement: true })
+            .grayscale()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+
+        const readers = [
+            BarcodeReader.DecoderType.code_128,
+            BarcodeReader.DecoderType.code_39,
+            BarcodeReader.DecoderType.code_93,
+            BarcodeReader.DecoderType.codabar,
+            BarcodeReader.DecoderType.ean_13,
+            BarcodeReader.DecoderType.ean_8,
+            BarcodeReader.DecoderType.std25,
+            BarcodeReader.DecoderType.int25
+        ];
+
+        for (const readerType of readers) {
+            try {
+                const result = BarcodeReader.decodeBarcode(data, info.width, info.height, readerType);
+                if (result) {
+                    console.log('✅ JavaScript Barcode Reader detected:', result);
+                    return {
+                        code: result,
+                        format: readerType
+                    };
+                }
+            } catch (e) {
+                // Try next reader type
+                continue;
+            }
+        }
+
+        console.log('❌ JavaScript Barcode Reader: No barcode detected');
+        return null;
+    } catch (error) {
+        console.error('JavaScript Barcode Reader error:', error);
+        return null;
+    }
+}
+
+// jsQR Implementation (for QR codes)
+async function scanWithJsQR(imageBuffer) {
+    try {
+        // Convert to proper format for jsQR
+        const { data, info } = await sharp(imageBuffer)
+            .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
+            .grayscale()
+            .normalize()
+            .png()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+
+        const qrResult = jsQR(new Uint8ClampedArray(data), info.width, info.height);
+        
+        if (qrResult && qrResult.data) {
+            console.log('✅ QR Code detected:', qrResult.data);
+            return qrResult.data;
+        }
+
+        console.log('❌ jsQR: No QR code detected');
+        return null;
+    } catch (error) {
+        console.error('jsQR scanning error:', error);
+        return null;
+    }
+}
+
+// Enhanced OCR with barcode pattern recognition
+async function performBarcodeOCR(imageBuffer) {
     let worker = null;
     try {
         worker = await createWorker();
         
-        // Configure Tesseract for barcode/alphanumeric text recognition
+        // Configure OCR for barcode text
         await worker.setParameters({
-            tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
-            tessedit_pageseg_mode: '8', // Treat the image as a single word
-            tessedit_ocr_engine_mode: '3' // Default OCR Engine Mode
+            tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_',
+            tessedit_pageseg_mode: '8', // Single word
+            tessedit_ocr_engine_mode: '1', // Neural nets LSTM
+            preserve_interword_spaces: '0'
         });
 
-        const { data: { text } } = await worker.recognize(imageBuffer);
+        // Process image for better OCR
+        const processedImage = await sharp(imageBuffer)
+            .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
+            .grayscale()
+            .normalize()
+            .sharpen()
+            .threshold(128)
+            .png()
+            .toBuffer();
+
+        const { data: { text } } = await worker.recognize(processedImage);
         
-        // Clean and validate the extracted text
-        const cleanText = text.replace(/\s+/g, '').replace(/[^A-Za-z0-9]/g, '');
-        
-        // Return if it looks like a valid barcode (minimum 10 characters)
-        if (cleanText.length >= 10) {
-            return cleanText;
+        // Enhanced barcode pattern matching
+        const barcodePatterns = [
+            /[A-Z0-9]{12,}/g,        // Long alphanumeric sequences
+            /\d{13,}/g,              // Long numeric sequences (EAN-13, etc.)
+            /[A-Z]{2,}\d{10,}/g,     // Mixed patterns (letters + numbers)
+            /\d{8}[A-Z0-9]{4,}/g,    // Numeric + alphanumeric
+            /[0-9A-F]{16,}/g,        // Hexadecimal patterns
+            /\b[A-Z0-9]{10,}\b/g     // Word boundary patterns
+        ];
+
+        let bestMatch = null;
+        let maxLength = 0;
+
+        for (const pattern of barcodePatterns) {
+            const matches = text.match(pattern);
+            if (matches) {
+                for (const match of matches) {
+                    const cleanMatch = match.trim();
+                    if (cleanMatch.length > maxLength && cleanMatch.length >= 10) {
+                        bestMatch = cleanMatch;
+                        maxLength = cleanMatch.length;
+                    }
+                }
+            }
         }
 
+        if (bestMatch) {
+            console.log('✅ Barcode pattern found via OCR:', bestMatch);
+            return bestMatch;
+        }
+
+        console.log('❌ OCR: No barcode pattern detected');
         return null;
     } catch (error) {
-        console.error('OCR processing error:', error);
+        console.error('Enhanced OCR error:', error);
         return null;
     } finally {
         if (worker) {
@@ -197,6 +380,60 @@ async function performOCROnImage(imageBuffer) {
         }
     }
 }
+
+// Try image variants if main scan fails
+async function scanImageVariants(imageBuffer) {
+    try {
+        const variants = [
+            // High contrast
+            sharp(imageBuffer).normalize().modulate({ brightness: 1.3, contrast: 1.8 }).png().toBuffer(),
+            // Inverted colors
+            sharp(imageBuffer).negate().normalize().png().toBuffer(),
+            // Edge enhanced
+            sharp(imageBuffer).grayscale().convolve({
+                width: 3,
+                height: 3,
+                kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1]
+            }).png().toBuffer(),
+            // Sharpened
+            sharp(imageBuffer).sharpen({ sigma: 2 }).normalize().png().toBuffer()
+        ];
+
+        const processedImages = await Promise.all(variants);
+
+        for (let i = 0; i < processedImages.length; i++) {
+            console.log(`🔍 Scanning variant ${i + 1}...`);
+            
+            // Try QuaggaJS on variant
+            const quaggaResult = await scanWithQuagga(processedImages[i]);
+            if (quaggaResult) {
+                return {
+                    type: 'BARCODE',
+                    data: quaggaResult.code,
+                    format: quaggaResult.format,
+                    method: `QuaggaJS Scanner (variant ${i + 1})`
+                };
+            }
+
+            // Try jsQR on variant
+            const qrResult = await scanWithJsQR(processedImages[i]);
+            if (qrResult) {
+                return {
+                    type: 'QR_CODE',
+                    data: qrResult,
+                    method: `jsQR Scanner (variant ${i + 1})`
+                };
+            }
+        }
+
+        return null;
+    } catch (error) {
+        console.error('Variant scanning error:', error);
+        return null;
+    }
+}
+
+// ========== END BARCODE SCANNING FUNCTIONS ==========
 
 // Bot command handlers
 bot.onText(/\/start/, async (msg) => {
@@ -216,9 +453,10 @@ bot.onText(/\/start/, async (msg) => {
                            `/stats - Usage statistics\n` +
                            `/removeuser @username - Remove client\n\n` +
                            `*Enhanced Features:* 🆕\n` +
-                           `• Professional barcode scanning\n` +
-                           `• QR code detection\n` +
-                           `• OCR text extraction\n` +
+                           `• QuaggaJS professional barcode scanning\n` +
+                           `• JavaScript Barcode Reader fallback\n` +
+                           `• QR code detection with jsQR\n` +
+                           `• OCR text extraction with pattern matching\n` +
                            `• Multi-variant image processing\n\n` +
                            `*Test the bot:* Send a ticket image to test enhanced scanning!\n\n` +
                            `*Dashboard:* Visit your admin dashboard for detailed analytics.`;
@@ -243,9 +481,10 @@ bot.onText(/\/start/, async (msg) => {
                           `*Enhanced Detection:* 🚀\n` +
                           `• Match details & seat information\n` +
                           `• Date, time & entry details\n` +
-                          `• **Professional barcode scanning** 📊\n` +
-                          `• **QR code detection** 🔍\n` +
-                          `• **OCR text extraction** ✨\n` +
+                          `• **QuaggaJS professional barcode scanning** 📊\n` +
+                          `• **Multiple barcode reader fallbacks** 🔍\n` +
+                          `• **QR code detection** ✨\n` +
+                          `• **Enhanced OCR with pattern matching** 🎯\n` +
                           `• Multi-variant image processing\n\n` +
                           `*Just send your ticket image now!* 📱`;
     
@@ -426,9 +665,10 @@ bot.onText(/\/stats/, async (msg) => {
                        `📅 This Week: ${stats.scans_this_week || 0}\n` +
                        `📅 Today: ${stats.scans_today || 0}\n\n` +
                        `🆕 *Enhanced Features Active:*\n` +
-                       `📊 Professional barcode scanning\n` +
-                       `🔍 QR code detection\n` +
-                       `✨ OCR text extraction`;
+                       `📊 QuaggaJS professional barcode scanning\n` +
+                       `🔍 JavaScript Barcode Reader fallback\n` +
+                       `✨ OCR text extraction with pattern matching\n` +
+                       `🎯 Multi-variant image processing`;
         
         bot.sendMessage(adminId, message, { parse_mode: 'Markdown' });
     });
@@ -448,7 +688,16 @@ async function processImageWithGemini(imageUrl) {
             contents: [{
                 parts: [
                     {
-                        text: `Analyze this Arsenal FC ticket image and extract all visible information. Focus especially on ANY barcode, QR code, or numerical codes visible on the ticket. Return ONLY a JSON object with these exact fields (use "Not detected" for missing information):
+                        text: `Analyze this Arsenal FC ticket image very carefully and extract all visible information. Pay special attention to ANY barcode, QR code, or numerical sequences visible ANYWHERE on the ticket - check all corners, edges, top, bottom, and sides of the ticket.
+
+Look for:
+1. Traditional black and white striped barcodes
+2. QR codes (square patterns)
+3. Long sequences of numbers or letters
+4. Any encoded data at the bottom or sides of the ticket
+5. Membership numbers, ticket numbers, or reference codes
+
+Return ONLY a JSON object with these exact fields:
 
 {
   "game": "Arsenal v [opponent team]",
@@ -459,10 +708,12 @@ async function processImageWithGemini(imageUrl) {
   "ticketType": "ticket category (Adult/Junior/Child/etc)",
   "membership": "membership number if visible",
   "enterVia": "entrance/gate information",
-  "barcode": "ANY barcode, QR code, or long numerical sequence visible on the ticket - look very carefully at bottom, sides, and corners"
+  "barcode": "ANY barcode data, QR code content, or long numerical/alphanumeric sequence visible - even if partially obscured, try to read it",
+  "ticketNumber": "any ticket reference number or ID visible",
+  "additionalCodes": "any other codes, numbers, or identifiers visible on the ticket"
 }
 
-IMPORTANT: Look extremely carefully for ANY barcode, QR code, or long sequence of numbers/letters anywhere on the ticket. Check all corners, edges, and bottom areas. Even if blurry, try to read the barcode text. This is critical information for ticket validation.`
+CRITICAL: Examine the entire ticket image pixel by pixel for ANY type of barcode, code, or long sequence. Even blurry or partially visible codes should be attempted to be read.`
                     },
                     {
                         inline_data: {
@@ -530,7 +781,7 @@ bot.on('photo', async (msg) => {
         }
     }
     
-    const statusMsg = await bot.sendMessage(userId, '🔍 *Processing your ticket...*\n\n📥 Step 1/4: Downloading high-resolution image...', { parse_mode: 'Markdown' });
+    const statusMsg = await bot.sendMessage(userId, '🔍 *Processing your ticket...*\n\n📥 Step 1/5: Downloading high-resolution image...', { parse_mode: 'Markdown' });
     
     try {
         // Get the highest resolution photo
@@ -544,7 +795,7 @@ bot.on('photo', async (msg) => {
         const imageUrl = `https://api.telegram.org/file/bot${config.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
         
         // Download image buffer for barcode scanning
-        await bot.editMessageText('🔍 *Processing your ticket...*\n\n🔍 Step 2/4: Professional barcode scanning (5 methods)...', {
+        await bot.editMessageText('🔍 *Processing your ticket...*\n\n🔍 Step 2/5: QuaggaJS professional barcode scanning...', {
             chat_id: userId,
             message_id: statusMsg.message_id,
             parse_mode: 'Markdown'
@@ -554,15 +805,22 @@ bot.on('photo', async (msg) => {
         const imageBuffer = await imageResponse.arrayBuffer();
         const buffer = Buffer.from(imageBuffer);
         
-        // Step 3: AI processing
-        await bot.editMessageText('🔍 *Processing your ticket...*\n\n🤖 Step 3/4: AI information extraction...', {
+        // Step 3: Multiple barcode scanning methods
+        await bot.editMessageText('🔍 *Processing your ticket...*\n\n📊 Step 3/5: Multiple barcode scanner fallbacks...', {
             chat_id: userId,
             message_id: statusMsg.message_id,
             parse_mode: 'Markdown'
         });
         
-        // Step 4: Combining results
-        await bot.editMessageText('🔍 *Processing your ticket...*\n\n⚡ Step 4/4: Combining results from all methods...', {
+        // Step 4: AI processing
+        await bot.editMessageText('🔍 *Processing your ticket...*\n\n🤖 Step 4/5: AI information extraction...', {
+            chat_id: userId,
+            message_id: statusMsg.message_id,
+            parse_mode: 'Markdown'
+        });
+        
+        // Step 5: Combining results
+        await bot.editMessageText('🔍 *Processing your ticket...*\n\n⚡ Step 5/5: Combining results from all methods...', {
             chat_id: userId,
             message_id: statusMsg.message_id,
             parse_mode: 'Markdown'
@@ -586,6 +844,7 @@ bot.on('photo', async (msg) => {
                 ticketData.barcode = barcodeResult.value.data;
                 ticketData.barcodeMethod = barcodeResult.value.method;
                 ticketData.barcodeType = barcodeResult.value.type;
+                ticketData.barcodeFormat = barcodeResult.value.format;
             } else {
                 ticketData = {
                     game: 'Not detected',
@@ -598,7 +857,8 @@ bot.on('photo', async (msg) => {
                     enterVia: 'Not detected',
                     barcode: barcodeResult.value.data,
                     barcodeMethod: barcodeResult.value.method,
-                    barcodeType: barcodeResult.value.type
+                    barcodeType: barcodeResult.value.type,
+                    barcodeFormat: barcodeResult.value.format
                 };
             }
         }
@@ -645,7 +905,8 @@ bot.on('photo', async (msg) => {
             if (!isAdmin(userId)) {
                 const clientAdminId = await getAdminForUser(userId);
                 if (clientAdminId) {
-                    const barcodeStatus = ticketData.barcode && ticketData.barcode !== 'Not detected' ? '✅ Barcode detected' : '❌ No barcode';
+                    const barcodeStatus = ticketData.barcode && ticketData.barcode !== 'Not detected' ? 
+                        `✅ Barcode detected (${ticketData.barcodeMethod || 'Unknown method'})` : '❌ No barcode';
                     bot.sendMessage(clientAdminId, `📊 *New Enhanced Scan Alert*\n\n${firstName} scanned: ${ticketData.game || 'Unknown match'}\n${barcodeStatus}`);
                 }
             }
@@ -729,9 +990,9 @@ bot.on('message', (msg) => {
                                '• Avoid shadows, reflections, or blur\n' +
                                '• Try taking a new screenshot if needed\n\n' +
                                '*Enhanced Features:* 🆕\n' +
-                               '📊 Professional barcode scanning\n' +
-                               '🔍 QR code detection\n' +
-                               '✨ OCR text extraction\n' +
+                               '📊 QuaggaJS professional barcode scanning\n' +
+                               '🔍 JavaScript Barcode Reader fallback\n' +
+                               '✨ OCR text extraction with pattern matching\n' +
                                '🖼️ Multi-variant image processing\n\n' +
                                '*Contact:* If you continue having problems, contact your administrator.';
             
@@ -763,6 +1024,9 @@ function formatTicketInfo(data) {
         response += `**Data:** \`${data.barcode}\`\n`;
         if (data.barcodeType) {
             response += `**Type:** ${data.barcodeType}\n`;
+        }
+        if (data.barcodeFormat) {
+            response += `**Format:** ${data.barcodeFormat}\n`;
         }
         if (data.barcodeMethod) {
             response += `**Detected by:** ${data.barcodeMethod}\n`;
@@ -842,17 +1106,18 @@ app.get('/admin/:adminId', (req, res) => {
             <div class="header">
                 <h1>🎫 Arsenal Ticket Bot <span class="enhanced-badge">ENHANCED</span></h1>
                 <p>Professional Admin Dashboard - ID: ${adminId}</p>
-                <small>Now featuring professional barcode scanning, QR detection & OCR extraction</small>
+                <small>Now featuring QuaggaJS professional barcode scanning with multiple fallbacks</small>
             </div>
             
             <div class="feature-list">
                 <h3>🆕 Enhanced Features Active</h3>
                 <ul>
-                    <li>Professional barcode scanning with 5 image variants</li>
-                    <li>QR code detection using jsQR technology</li>
-                    <li>OCR text extraction with Tesseract.js</li>
-                    <li>Multi-method image processing with Sharp</li>
-                    <li>Real-time progress updates for users</li>
+                    <li>QuaggaJS professional barcode scanning for traditional barcodes</li>
+                    <li>JavaScript Barcode Reader as secondary fallback scanner</li>
+                    <li>jsQR for QR code detection and scanning</li>
+                    <li>Enhanced OCR text extraction with barcode pattern matching</li>
+                    <li>Multi-variant image processing with Sharp</li>
+                    <li>Real-time progress updates for users during scanning</li>
                 </ul>
             </div>
             
@@ -1102,11 +1367,12 @@ app.get('/health', (req, res) => {
         uptime: process.uptime(),
         timestamp: new Date().toISOString(),
         admins: config.ADMIN_IDS.length,
-        version: '2.0.0',
+        version: '3.0.0',
         features: [
-            'professional_barcode_scanning',
-            'qr_code_detection', 
-            'ocr_text_extraction',
+            'quagga_js_professional_barcode_scanning',
+            'javascript_barcode_reader_fallback',
+            'jsqr_qr_code_detection', 
+            'enhanced_ocr_text_extraction',
             'multi_variant_processing',
             'enhanced_admin_dashboard'
         ]
@@ -1127,5 +1393,5 @@ app.listen(config.PORT, () => {
 console.log('🚀 Arsenal Ticket Bot is now running!');
 console.log('🤖 Bot username: @Arsenal_PK_bot');
 console.log('👥 Configured admins:', config.ADMIN_IDS);
-console.log('🔍 Enhanced features: Professional barcode scanning, QR detection, OCR extraction');
-console.log('✨ Ready for enhanced ticket processing!');
+console.log('🔍 Enhanced features: QuaggaJS professional barcode scanning, JavaScript Barcode Reader fallback, jsQR detection, Enhanced OCR');
+console.log('✨ Ready for enhanced ticket processing with professional barcode scanning!');
