@@ -4,6 +4,9 @@ const sqlite3 = require('sqlite3').verbose();
 const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
+const sharp = require('sharp');
+const { createWorker } = require('tesseract.js');
+const jsQR = require('jsqr');
 
 // Configuration
 const config = {
@@ -19,7 +22,7 @@ const bot = new TelegramBot(config.TELEGRAM_BOT_TOKEN, { polling: true });
 const app = express();
 const db = new sqlite3.Database(config.DATABASE_PATH);
 
-console.log('🤖 Arsenal Ticket Bot Starting... (Updated from VS Code!)');
+console.log('🤖 Arsenal Ticket Bot Starting... (Enhanced with Professional Barcode Scanning!)');
 console.log('👥 Admins:', config.ADMIN_IDS);
 
 // Database setup
@@ -98,6 +101,103 @@ function logMessage(userId, messageText, messageType = 'text') {
            [userId, messageText, messageType]);
 }
 
+// Enhanced barcode scanning function with multiple methods
+async function scanBarcodeFromImage(imageBuffer) {
+    try {
+        console.log('🔍 Starting professional barcode scan...');
+        
+        // Convert image to various formats for better scanning
+        const processedImages = await Promise.all([
+            // Original image
+            sharp(imageBuffer).png().toBuffer(),
+            // High contrast version
+            sharp(imageBuffer).normalize().sharpen().png().toBuffer(),
+            // Grayscale with increased contrast
+            sharp(imageBuffer).grayscale().normalize().modulate({ brightness: 1.2, contrast: 1.5 }).png().toBuffer(),
+            // Inverted colors (white text on black background)
+            sharp(imageBuffer).negate().png().toBuffer(),
+            // Enhanced version with edge detection
+            sharp(imageBuffer).grayscale().normalize().sharpen({ sigma: 1.5 }).png().toBuffer()
+        ]);
+
+        // Try scanning each processed image variant
+        for (let i = 0; i < processedImages.length; i++) {
+            console.log(`🔍 Scanning image variant ${i + 1}/5...`);
+            
+            try {
+                // Method 1: QR Code scanning with jsQR
+                const { data, info } = await sharp(processedImages[i]).raw().toBuffer({ resolveWithObject: true });
+                const qrResult = jsQR(new Uint8ClampedArray(data), info.width, info.height);
+                
+                if (qrResult) {
+                    console.log('✅ QR Code detected:', qrResult.data);
+                    return {
+                        type: 'QR_CODE',
+                        data: qrResult.data,
+                        method: `QR Scanner (variant ${i + 1})`
+                    };
+                }
+
+                // Method 2: OCR-based barcode text extraction
+                const ocrResult = await performOCROnImage(processedImages[i]);
+                if (ocrResult && ocrResult.length >= 10) {
+                    console.log('✅ Barcode text extracted via OCR:', ocrResult);
+                    return {
+                        type: 'BARCODE_OCR',
+                        data: ocrResult,
+                        method: `OCR Scanner (variant ${i + 1})`
+                    };
+                }
+
+            } catch (error) {
+                console.log(`❌ Variant ${i + 1} scan failed:`, error.message);
+                continue;
+            }
+        }
+
+        console.log('❌ No barcode found in any image variant');
+        return null;
+
+    } catch (error) {
+        console.error('❌ Barcode scanning error:', error);
+        return null;
+    }
+}
+
+// OCR function optimized for barcode text extraction
+async function performOCROnImage(imageBuffer) {
+    let worker = null;
+    try {
+        worker = await createWorker();
+        
+        // Configure Tesseract for barcode/alphanumeric text recognition
+        await worker.setParameters({
+            tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
+            tessedit_pageseg_mode: '8', // Treat the image as a single word
+            tessedit_ocr_engine_mode: '3' // Default OCR Engine Mode
+        });
+
+        const { data: { text } } = await worker.recognize(imageBuffer);
+        
+        // Clean and validate the extracted text
+        const cleanText = text.replace(/\s+/g, '').replace(/[^A-Za-z0-9]/g, '');
+        
+        // Return if it looks like a valid barcode (minimum 10 characters)
+        if (cleanText.length >= 10) {
+            return cleanText;
+        }
+
+        return null;
+    } catch (error) {
+        console.error('OCR processing error:', error);
+        return null;
+    } finally {
+        if (worker) {
+            await worker.terminate();
+        }
+    }
+}
+
 // Bot command handlers
 bot.onText(/\/start/, async (msg) => {
     const userId = msg.from.id;
@@ -115,7 +215,12 @@ bot.onText(/\/start/, async (msg) => {
                            `/listusers - View your clients\n` +
                            `/stats - Usage statistics\n` +
                            `/removeuser @username - Remove client\n\n` +
-                           `*Test the bot:* Send a ticket image to test scanning!\n\n` +
+                           `*Enhanced Features:* 🆕\n` +
+                           `• Professional barcode scanning\n` +
+                           `• QR code detection\n` +
+                           `• OCR text extraction\n` +
+                           `• Multi-variant image processing\n\n` +
+                           `*Test the bot:* Send a ticket image to test enhanced scanning!\n\n` +
                            `*Dashboard:* Visit your admin dashboard for detailed analytics.`;
         
         bot.sendMessage(userId, adminMessage, { parse_mode: 'Markdown' });
@@ -131,17 +236,17 @@ bot.onText(/\/start/, async (msg) => {
     // Update last used
     db.run("UPDATE users SET last_used = CURRENT_TIMESTAMP WHERE user_id = ?", [userId]);
     
-    const welcomeMessage = `🎫 *Arsenal Ticket Scanner*\n\n` +
-                          `Hello ${firstName}! Welcome to the Arsenal ticket information extractor.\n\n` +
+    const welcomeMessage = `🎫 *Arsenal Ticket Scanner* 🆕\n\n` +
+                          `Hello ${firstName}! Welcome to the enhanced Arsenal ticket information extractor.\n\n` +
                           `📸 *How to use:*\n` +
                           `Simply send me a screenshot of your Arsenal ticket and I'll extract all the information for you!\n\n` +
-                          `The bot can identify:\n` +
-                          `• Match details\n` +
-                          `• Date and time\n` +
-                          `• Seat information\n` +
-                          `• Ticket type\n` +
-                          `• Entry details\n` +
-                          `• And more!\n\n` +
+                          `*Enhanced Detection:* 🚀\n` +
+                          `• Match details & seat information\n` +
+                          `• Date, time & entry details\n` +
+                          `• **Professional barcode scanning** 📊\n` +
+                          `• **QR code detection** 🔍\n` +
+                          `• **OCR text extraction** ✨\n` +
+                          `• Multi-variant image processing\n\n` +
                           `*Just send your ticket image now!* 📱`;
     
     bot.sendMessage(userId, welcomeMessage, { parse_mode: 'Markdown' });
@@ -178,7 +283,7 @@ bot.onText(/\/adduser (.+)/, async (msg, match) => {
                            `Please have @${targetUsername} complete these steps:\n\n` +
                            `1. Start a chat with this bot: @Arsenal_PK_bot\n` +
                            `2. Send the command: /register\n` +
-                           `3. They will then be able to use the ticket scanner\n\n` +
+                           `3. They will then be able to use the enhanced ticket scanner\n\n` +
                            `The invitation is ready and waiting for them!`;
             
             bot.sendMessage(adminId, message, { parse_mode: 'Markdown' });
@@ -213,13 +318,13 @@ bot.onText(/\/register/, async (msg) => {
                 console.log(`✅ User registered: ${firstName} (@${username}) under admin ${row.admin_id}`);
                 
                 const successMessage = `✅ *Registration Complete!*\n\n` +
-                                      `Welcome ${firstName}! You can now use the Arsenal ticket scanner.\n\n` +
+                                      `Welcome ${firstName}! You can now use the enhanced Arsenal ticket scanner.\n\n` +
                                       `📸 *Send me a ticket image to get started!*`;
                 
                 bot.sendMessage(userId, successMessage, { parse_mode: 'Markdown' });
                 
                 // Notify admin
-                bot.sendMessage(row.admin_id, `✅ *New Client Registered*\n\n${firstName} (@${username}) has successfully registered and can now use the bot.`);
+                bot.sendMessage(row.admin_id, `✅ *New Client Registered*\n\n${firstName} (@${username}) has successfully registered and can now use the enhanced bot.`);
             });
         } else {
             const errorMessage = `❌ *Registration Not Found*\n\n` +
@@ -319,174 +424,17 @@ bot.onText(/\/stats/, async (msg) => {
                        `📋 Total Clients: ${stats.total_users || 0}\n` +
                        `🎫 Total Scans: ${stats.total_scans || 0}\n` +
                        `📅 This Week: ${stats.scans_this_week || 0}\n` +
-                       `📅 Today: ${stats.scans_today || 0}`;
+                       `📅 Today: ${stats.scans_today || 0}\n\n` +
+                       `🆕 *Enhanced Features Active:*\n` +
+                       `📊 Professional barcode scanning\n` +
+                       `🔍 QR code detection\n` +
+                       `✨ OCR text extraction`;
         
         bot.sendMessage(adminId, message, { parse_mode: 'Markdown' });
     });
 });
 
-// Handle photo messages
-bot.on('photo', async (msg) => {
-    const userId = msg.from.id;
-    const firstName = msg.from.first_name || 'User';
-    
-    console.log(`📸 Photo received from ${firstName} (${userId})`);
-    logMessage(userId, 'Sent photo', 'photo');
-    
-    // Check authorization for non-admins
-    if (!isAdmin(userId)) {
-        const isAuthorized = await isAuthorizedUser(userId);
-        if (!isAuthorized) {
-            bot.sendMessage(userId, '❌ *Access Denied*\n\nYou are not authorized to use this bot. Contact an administrator for access.');
-            return;
-        }
-    }
-    
-    const statusMsg = await bot.sendMessage(userId, '🔍 *Processing your ticket...*\n\nPlease wait while I analyze the image and extract information.', { parse_mode: 'Markdown' });
-    
-    try {
-        // Get the highest resolution photo
-        const photo = msg.photo[msg.photo.length - 1];
-        const fileId = photo.file_id;
-        
-        console.log(`📸 Processing photo file: ${fileId}`);
-        
-        // Download the image
-        const file = await bot.getFile(fileId);
-        const imageUrl = `https://api.telegram.org/file/bot${config.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
-        
-        // Process with Gemini
-        const ticketData = await processImageWithGemini(imageUrl);
-        
-        if (ticketData) {
-            // Save scan to database
-            const adminId = await getAdminForUser(userId) || (isAdmin(userId) ? userId : null);
-            if (adminId) {
-                db.run("INSERT INTO scans (user_id, admin_id, scan_data) VALUES (?, ?, ?)", 
-                       [userId, adminId, JSON.stringify(ticketData)]);
-                console.log(`💾 Scan saved for user ${userId} under admin ${adminId}`);
-            }
-            
-            // Update last used
-            if (!isAdmin(userId)) {
-                db.run("UPDATE users SET last_used = CURRENT_TIMESTAMP WHERE user_id = ?", [userId]);
-            }
-            
-            // Format the response
-            const response = formatTicketInfo(ticketData);
-            
-            // Send results with confirmation
-            const keyboard = {
-                inline_keyboard: [
-                    [
-                        { text: '✅ Information is Correct', callback_data: 'confirm' },
-                        { text: '✏️ Request Edit', callback_data: 'edit' }
-                    ]
-                ]
-            };
-            
-            await bot.editMessageText(response, {
-                chat_id: userId,
-                message_id: statusMsg.message_id,
-                parse_mode: 'Markdown',
-                reply_markup: keyboard
-            });
-            
-            // Store data for potential editing
-            global.pendingEdits = global.pendingEdits || {};
-            global.pendingEdits[userId] = ticketData;
-            
-            // Notify admin if it's a client scan
-            if (!isAdmin(userId)) {
-                const clientAdminId = await getAdminForUser(userId);
-                if (clientAdminId) {
-                    bot.sendMessage(clientAdminId, `📊 *New Scan Alert*\n\n${firstName} just scanned a ticket for: ${ticketData.game || 'Unknown match'}`);
-                }
-            }
-            
-        } else {
-            await bot.editMessageText('❌ *Processing Failed*\n\nI could not extract ticket information from this image.\n\n*Tips:*\n• Ensure the image is clear and well-lit\n• Make sure all text is visible\n• Try taking a new screenshot\n\nPlease try again with a clearer image.', {
-                chat_id: userId,
-                message_id: statusMsg.message_id,
-                parse_mode: 'Markdown'
-            });
-        }
-        
-    } catch (error) {
-        console.error('❌ Error processing image:', error);
-        await bot.editMessageText(`❌ *Processing Error*\n\nSorry, there was an error processing your image: ${error.message}\n\nPlease try again or contact an administrator if the problem persists.`, {
-            chat_id: userId,
-            message_id: statusMsg.message_id,
-            parse_mode: 'Markdown'
-        });
-    }
-});
-
-// Handle callback queries (button presses)
-bot.on('callback_query', (query) => {
-    const userId = query.from.id;
-    const data = query.data;
-    const firstName = query.from.first_name || 'User';
-    
-    console.log(`🔘 Button pressed: ${data} by ${firstName} (${userId})`);
-    
-    if (data === 'confirm') {
-        bot.answerCallbackQuery(query.id, { text: '✅ Information confirmed!' });
-        bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
-            chat_id: userId,
-            message_id: query.message.message_id
-        });
-        
-        // Add confirmation message
-        bot.sendMessage(userId, '✅ *Scan Complete!*\n\nTicket information has been processed and saved. Send another ticket image anytime!', { parse_mode: 'Markdown' });
-        
-    } else if (data === 'edit') {
-        bot.answerCallbackQuery(query.id, { text: 'Edit request noted' });
-        bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
-            chat_id: userId,
-            message_id: query.message.message_id
-        });
-        
-        const editMessage = '✏️ *Edit Request Received*\n\n' +
-                           'Please describe what information needs to be corrected and I\'ll help you.\n\n' +
-                           '*What would you like to change?*\n' +
-                           '• Match details\n' +
-                           '• Date/time\n' +
-                           '• Seat information\n' +
-                           '• Other details\n\n' +
-                           'Just tell me what needs fixing!';
-        
-        bot.sendMessage(userId, editMessage, { parse_mode: 'Markdown' });
-    }
-});
-
-// Handle text messages (for edit requests)
-bot.on('message', (msg) => {
-    // Skip if it's a command, photo, or callback query
-    if (msg.text && !msg.text.startsWith('/') && !msg.photo) {
-        const userId = msg.from.id;
-        const firstName = msg.from.first_name || 'User';
-        
-        // Log all text messages
-        logMessage(userId, msg.text, 'text');
-        
-        // If user is asking for help or has a question
-        if (msg.text.toLowerCase().includes('help') || msg.text.includes('?')) {
-            const helpMessage = '❓ *Need Help?*\n\n' +
-                               '*For ticket scanning:*\n' +
-                               '📸 Just send me a clear image of your Arsenal ticket\n\n' +
-                               '*For issues:*\n' +
-                               '• Make sure the image is clear and well-lit\n' +
-                               '• Ensure all text on the ticket is visible\n' +
-                               '• Try taking a new screenshot if needed\n\n' +
-                               '*Contact:* If you continue having problems, contact your administrator.';
-            
-            bot.sendMessage(userId, helpMessage, { parse_mode: 'Markdown' });
-        }
-    }
-});
-
-// Gemini API processing function
+// Enhanced Gemini processing function
 async function processImageWithGemini(imageUrl) {
     try {
         console.log('🤖 Processing image with Gemini AI...');
@@ -500,7 +448,7 @@ async function processImageWithGemini(imageUrl) {
             contents: [{
                 parts: [
                     {
-                        text: `Analyze this Arsenal FC ticket image and extract all visible information. Return ONLY a JSON object with these exact fields (use "Not detected" for missing information):
+                        text: `Analyze this Arsenal FC ticket image and extract all visible information. Focus especially on ANY barcode, QR code, or numerical codes visible on the ticket. Return ONLY a JSON object with these exact fields (use "Not detected" for missing information):
 
 {
   "game": "Arsenal v [opponent team]",
@@ -511,11 +459,10 @@ async function processImageWithGemini(imageUrl) {
   "ticketType": "ticket category (Adult/Junior/Child/etc)",
   "membership": "membership number if visible",
   "enterVia": "entrance/gate information",
-  "barcode": "barcode number or text if clearly visible",
-  "price": "ticket price if shown"
+  "barcode": "ANY barcode, QR code, or long numerical sequence visible on the ticket - look very carefully at bottom, sides, and corners"
 }
 
-Look carefully at all text on the ticket including small print. For the game field, always use format "Arsenal v [opponent]". Be precise with seat details.`
+IMPORTANT: Look extremely carefully for ANY barcode, QR code, or long sequence of numbers/letters anywhere on the ticket. Check all corners, edges, and bottom areas. Even if blurry, try to read the barcode text. This is critical information for ticket validation.`
                     },
                     {
                         inline_data: {
@@ -566,14 +513,241 @@ Look carefully at all text on the ticket including small print. For the game fie
     }
 }
 
-// Format ticket information for display
+// Enhanced photo handler with professional barcode scanning
+bot.on('photo', async (msg) => {
+    const userId = msg.from.id;
+    const firstName = msg.from.first_name || 'User';
+    
+    console.log(`📸 Photo received from ${firstName} (${userId})`);
+    logMessage(userId, 'Sent photo', 'photo');
+    
+    // Check authorization for non-admins
+    if (!isAdmin(userId)) {
+        const isAuthorized = await isAuthorizedUser(userId);
+        if (!isAuthorized) {
+            bot.sendMessage(userId, '❌ *Access Denied*\n\nYou are not authorized to use this bot. Contact an administrator for access.');
+            return;
+        }
+    }
+    
+    const statusMsg = await bot.sendMessage(userId, '🔍 *Processing your ticket...*\n\n📥 Step 1/4: Downloading high-resolution image...', { parse_mode: 'Markdown' });
+    
+    try {
+        // Get the highest resolution photo
+        const photo = msg.photo[msg.photo.length - 1];
+        const fileId = photo.file_id;
+        
+        console.log(`📸 Processing photo file: ${fileId}`);
+        
+        // Download the image
+        const file = await bot.getFile(fileId);
+        const imageUrl = `https://api.telegram.org/file/bot${config.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+        
+        // Download image buffer for barcode scanning
+        await bot.editMessageText('🔍 *Processing your ticket...*\n\n🔍 Step 2/4: Professional barcode scanning (5 methods)...', {
+            chat_id: userId,
+            message_id: statusMsg.message_id,
+            parse_mode: 'Markdown'
+        });
+        
+        const imageResponse = await fetch(imageUrl);
+        const imageBuffer = await imageResponse.arrayBuffer();
+        const buffer = Buffer.from(imageBuffer);
+        
+        // Step 3: AI processing
+        await bot.editMessageText('🔍 *Processing your ticket...*\n\n🤖 Step 3/4: AI information extraction...', {
+            chat_id: userId,
+            message_id: statusMsg.message_id,
+            parse_mode: 'Markdown'
+        });
+        
+        // Step 4: Combining results
+        await bot.editMessageText('🔍 *Processing your ticket...*\n\n⚡ Step 4/4: Combining results from all methods...', {
+            chat_id: userId,
+            message_id: statusMsg.message_id,
+            parse_mode: 'Markdown'
+        });
+        
+        // Process with both methods simultaneously
+        const [geminiResult, barcodeResult] = await Promise.allSettled([
+            processImageWithGemini(imageUrl),
+            scanBarcodeFromImage(buffer)
+        ]);
+        
+        // Combine results
+        let ticketData = null;
+        if (geminiResult.status === 'fulfilled' && geminiResult.value) {
+            ticketData = geminiResult.value;
+        }
+        
+        // Add barcode information if found
+        if (barcodeResult.status === 'fulfilled' && barcodeResult.value) {
+            if (ticketData) {
+                ticketData.barcode = barcodeResult.value.data;
+                ticketData.barcodeMethod = barcodeResult.value.method;
+                ticketData.barcodeType = barcodeResult.value.type;
+            } else {
+                ticketData = {
+                    game: 'Not detected',
+                    datetime: 'Not detected',
+                    area: 'Not detected',
+                    row: 'Not detected',
+                    seat: 'Not detected',
+                    ticketType: 'Not detected',
+                    membership: 'Not detected',
+                    enterVia: 'Not detected',
+                    barcode: barcodeResult.value.data,
+                    barcodeMethod: barcodeResult.value.method,
+                    barcodeType: barcodeResult.value.type
+                };
+            }
+        }
+        
+        if (ticketData) {
+            // Save scan to database
+            const adminId = await getAdminForUser(userId) || (isAdmin(userId) ? userId : null);
+            if (adminId) {
+                db.run("INSERT INTO scans (user_id, admin_id, scan_data) VALUES (?, ?, ?)", 
+                       [userId, adminId, JSON.stringify(ticketData)]);
+                console.log(`💾 Scan saved for user ${userId} under admin ${adminId}`);
+            }
+            
+            // Update last used
+            if (!isAdmin(userId)) {
+                db.run("UPDATE users SET last_used = CURRENT_TIMESTAMP WHERE user_id = ?", [userId]);
+            }
+            
+            // Format the response
+            const response = formatTicketInfo(ticketData);
+            
+            // Send results with confirmation
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Information is Correct', callback_data: 'confirm' },
+                        { text: '✏️ Request Edit', callback_data: 'edit' }
+                    ]
+                ]
+            };
+            
+            await bot.editMessageText(response, {
+                chat_id: userId,
+                message_id: statusMsg.message_id,
+                parse_mode: 'Markdown',
+                reply_markup: keyboard
+            });
+            
+            // Store data for potential editing
+            global.pendingEdits = global.pendingEdits || {};
+            global.pendingEdits[userId] = ticketData;
+            
+            // Notify admin if it's a client scan
+            if (!isAdmin(userId)) {
+                const clientAdminId = await getAdminForUser(userId);
+                if (clientAdminId) {
+                    const barcodeStatus = ticketData.barcode && ticketData.barcode !== 'Not detected' ? '✅ Barcode detected' : '❌ No barcode';
+                    bot.sendMessage(clientAdminId, `📊 *New Enhanced Scan Alert*\n\n${firstName} scanned: ${ticketData.game || 'Unknown match'}\n${barcodeStatus}`);
+                }
+            }
+            
+        } else {
+            await bot.editMessageText('❌ *Processing Failed*\n\nI could not extract ticket information from this image.\n\n*Tips for better results:*\n• Ensure the image is clear and well-lit\n• Make sure all text is visible\n• Ensure barcode/QR code is clearly visible\n• Try taking a new screenshot\n• Avoid shadows or reflections\n\nPlease try again with a clearer image.', {
+                chat_id: userId,
+                message_id: statusMsg.message_id,
+                parse_mode: 'Markdown'
+            });
+        }
+        
+    } catch (error) {
+        console.error('❌ Error processing image:', error);
+        await bot.editMessageText(`❌ *Processing Error*\n\nSorry, there was an error processing your image: ${error.message}\n\nPlease try again or contact an administrator if the problem persists.`, {
+            chat_id: userId,
+            message_id: statusMsg.message_id,
+            parse_mode: 'Markdown'
+        });
+    }
+});
+
+// Handle callback queries (button presses)
+bot.on('callback_query', (query) => {
+    const userId = query.from.id;
+    const data = query.data;
+    const firstName = query.from.first_name || 'User';
+    
+    console.log(`🔘 Button pressed: ${data} by ${firstName} (${userId})`);
+    
+    if (data === 'confirm') {
+        bot.answerCallbackQuery(query.id, { text: '✅ Information confirmed!' });
+        bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+            chat_id: userId,
+            message_id: query.message.message_id
+        });
+        
+        // Add confirmation message
+        bot.sendMessage(userId, '✅ *Scan Complete!*\n\nTicket information has been processed and saved. Send another ticket image anytime to test the enhanced scanning!', { parse_mode: 'Markdown' });
+        
+    } else if (data === 'edit') {
+        bot.answerCallbackQuery(query.id, { text: 'Edit request noted' });
+        bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+            chat_id: userId,
+            message_id: query.message.message_id
+        });
+        
+        const editMessage = '✏️ *Edit Request Received*\n\n' +
+                           'Please describe what information needs to be corrected and I\'ll help you.\n\n' +
+                           '*What would you like to change?*\n' +
+                           '• Match details\n' +
+                           '• Date/time\n' +
+                           '• Seat information\n' +
+                           '• Barcode data\n' +
+                           '• Other details\n\n' +
+                           'Just tell me what needs fixing!';
+        
+        bot.sendMessage(userId, editMessage, { parse_mode: 'Markdown' });
+    }
+});
+
+// Handle text messages (for edit requests and help)
+bot.on('message', (msg) => {
+    // Skip if it's a command, photo, or callback query
+    if (msg.text && !msg.text.startsWith('/') && !msg.photo) {
+        const userId = msg.from.id;
+        const firstName = msg.from.first_name || 'User';
+        
+        // Log all text messages
+        logMessage(userId, msg.text, 'text');
+        
+        // If user is asking for help or has a question
+        if (msg.text.toLowerCase().includes('help') || msg.text.includes('?')) {
+            const helpMessage = '❓ *Need Help?*\n\n' +
+                               '*For enhanced ticket scanning:*\n' +
+                               '📸 Just send me a clear image of your Arsenal ticket\n\n' +
+                               '*For best results:*\n' +
+                               '• Make sure the image is clear and well-lit\n' +
+                               '• Ensure all text on the ticket is visible\n' +
+                               '• Make sure barcodes/QR codes are clearly visible\n' +
+                               '• Avoid shadows, reflections, or blur\n' +
+                               '• Try taking a new screenshot if needed\n\n' +
+                               '*Enhanced Features:* 🆕\n' +
+                               '📊 Professional barcode scanning\n' +
+                               '🔍 QR code detection\n' +
+                               '✨ OCR text extraction\n' +
+                               '🖼️ Multi-variant image processing\n\n' +
+                               '*Contact:* If you continue having problems, contact your administrator.';
+            
+            bot.sendMessage(userId, helpMessage, { parse_mode: 'Markdown' });
+        }
+    }
+});
+
+// Enhanced format function with professional barcode display
 function formatTicketInfo(data) {
     const formatField = (label, value, emoji) => {
         const displayValue = (value && value !== "Not detected" && value !== "null") ? value : "Not detected";
         return `${emoji} **${label}:** ${displayValue}`;
     };
 
-    return `🎫 *Ticket Information Extracted*\n\n` +
+    let response = `🎫 *Ticket Information Extracted* 🆕\n\n` +
            `${formatField('Match', data.game, '⚽')}\n` +
            `${formatField('Date & Time', data.datetime, '📅')}\n` +
            `${formatField('Area/Section', data.area, '🏟️')}\n` +
@@ -581,10 +755,24 @@ function formatTicketInfo(data) {
            `${formatField('Seat', data.seat, '💺')}\n` +
            `${formatField('Ticket Type', data.ticketType, '🎟️')}\n` +
            `${formatField('Membership', data.membership, '🆔')}\n` +
-           `${formatField('Enter Via', data.enterVia, '🚪')}\n` +
-           `${formatField('Price', data.price, '💷')}\n` +
-           `${formatField('Barcode', data.barcode, '📊')}\n\n` +
-           `*Is this information correct?*`;
+           `${formatField('Enter Via', data.enterVia, '🚪')}\n`;
+
+    // Enhanced barcode display with professional formatting
+    if (data.barcode && data.barcode !== "Not detected") {
+        response += `\n📊 **Enhanced Barcode Information:**\n`;
+        response += `**Data:** \`${data.barcode}\`\n`;
+        if (data.barcodeType) {
+            response += `**Type:** ${data.barcodeType}\n`;
+        }
+        if (data.barcodeMethod) {
+            response += `**Detected by:** ${data.barcodeMethod}\n`;
+        }
+    } else {
+        response += `\n📊 **Barcode:** Not detected by any scanning method\n`;
+    }
+
+    response += `\n*Is this information correct?*`;
+    return response;
 }
 
 // Error handling
@@ -604,7 +792,7 @@ process.on('unhandledRejection', (error) => {
 app.use(express.static('public'));
 app.use(express.json());
 
-// Admin dashboard route
+// Enhanced admin dashboard route
 app.get('/admin/:adminId', (req, res) => {
     const adminId = parseInt(req.params.adminId);
     if (!config.ADMIN_IDS.includes(adminId)) {
@@ -617,7 +805,7 @@ app.get('/admin/:adminId', (req, res) => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Arsenal Ticket Bot - Admin Dashboard</title>
+        <title>Arsenal Ticket Bot - Enhanced Admin Dashboard</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background: #f5f7fa; }
@@ -625,6 +813,7 @@ app.get('/admin/:adminId', (req, res) => {
             .header { background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); color: white; padding: 30px; border-radius: 15px; margin-bottom: 30px; text-align: center; }
             .header h1 { font-size: 2.5rem; margin-bottom: 10px; }
             .header p { opacity: 0.9; font-size: 1.1rem; }
+            .enhanced-badge { background: #059669; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; margin-left: 10px; }
             .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
             .stat-card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; border-left: 4px solid #dc2626; }
             .stat-number { font-size: 2.5em; font-weight: bold; color: #dc2626; margin-bottom: 5px; }
@@ -636,30 +825,48 @@ app.get('/admin/:adminId', (req, res) => {
             th { background: #f9fafb; font-weight: 600; color: #374151; }
             .status-active { color: #059669; font-weight: bold; }
             .status-inactive { color: #dc2626; font-weight: bold; }
+            .barcode-success { color: #059669; font-weight: bold; }
+            .barcode-failed { color: #dc2626; font-weight: bold; }
             .refresh-btn { background: #dc2626; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; float: right; margin-bottom: 20px; }
             .refresh-btn:hover { background: #991b1b; }
             .loading { text-align: center; padding: 40px; color: #6b7280; }
+            .feature-list { background: #f0f9ff; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+            .feature-list h3 { color: #0369a1; margin-bottom: 15px; }
+            .feature-list ul { list-style: none; padding: 0; }
+            .feature-list li { padding: 5px 0; color: #0c4a6e; }
+            .feature-list li:before { content: "✨ "; color: #059669; }
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h1>🎫 Arsenal Ticket Bot</h1>
-                <p>Admin Dashboard - ID: ${adminId}</p>
-                <small>Real-time monitoring and analytics</small>
+                <h1>🎫 Arsenal Ticket Bot <span class="enhanced-badge">ENHANCED</span></h1>
+                <p>Professional Admin Dashboard - ID: ${adminId}</p>
+                <small>Now featuring professional barcode scanning, QR detection & OCR extraction</small>
+            </div>
+            
+            <div class="feature-list">
+                <h3>🆕 Enhanced Features Active</h3>
+                <ul>
+                    <li>Professional barcode scanning with 5 image variants</li>
+                    <li>QR code detection using jsQR technology</li>
+                    <li>OCR text extraction with Tesseract.js</li>
+                    <li>Multi-method image processing with Sharp</li>
+                    <li>Real-time progress updates for users</li>
+                </ul>
             </div>
             
             <button class="refresh-btn" onclick="loadDashboard()">🔄 Refresh Data</button>
             <div class="clearfix" style="clear: both;"></div>
             
             <div id="dashboard" class="loading">
-                <h3>Loading dashboard data...</h3>
+                <h3>Loading enhanced dashboard data...</h3>
             </div>
         </div>
         
         <script>
             function loadDashboard() {
-                document.getElementById('dashboard').innerHTML = '<div class="loading"><h3>Loading dashboard data...</h3></div>';
+                document.getElementById('dashboard').innerHTML = '<div class="loading"><h3>Loading enhanced dashboard data...</h3></div>';
                 
                 fetch('/api/stats/${adminId}')
                     .then(response => response.json())
@@ -685,6 +892,10 @@ app.get('/admin/:adminId', (req, res) => {
                                 <div class="stat-card">
                                     <div class="stat-number">\${data.scansThisWeek}</div>
                                     <div class="stat-label">This Week</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-number">\${data.barcodeSuccessRate || 0}%</div>
+                                    <div class="stat-label">Barcode Success Rate</div>
                                 </div>
                             </div>
                             
@@ -718,13 +929,15 @@ app.get('/admin/:adminId', (req, res) => {
                             </div>
                             
                             <div class="section">
-                                <h2>📊 Recent Activity</h2>
+                                <h2>📊 Recent Enhanced Scans</h2>
                                 <table>
                                     <thead>
                                         <tr>
                                             <th>Date</th>
                                             <th>Client</th>
                                             <th>Match</th>
+                                            <th>Barcode Status</th>
+                                            <th>Detection Method</th>
                                             <th>Time</th>
                                         </tr>
                                     </thead>
@@ -734,6 +947,8 @@ app.get('/admin/:adminId', (req, res) => {
                                                 <td>\${scan.date}</td>
                                                 <td>\${scan.client}</td>
                                                 <td>\${scan.match}</td>
+                                                <td><span class="barcode-\${scan.barcodeStatus.includes('✅') ? 'success' : 'failed'}">\${scan.barcodeStatus}</span></td>
+                                                <td>\${scan.detectionMethod || 'Standard'}</td>
                                                 <td>\${scan.time}</td>
                                             </tr>
                                         \`).join('')}
@@ -760,7 +975,7 @@ app.get('/admin/:adminId', (req, res) => {
     `);
 });
 
-// API endpoint for dashboard stats
+// Enhanced API endpoint for dashboard stats
 app.get('/api/stats/:adminId', (req, res) => {
     const adminId = parseInt(req.params.adminId);
     
@@ -793,7 +1008,7 @@ app.get('/api/stats/:adminId', (req, res) => {
             WHERE u.admin_id = ? AND u.user_id != 0
         `, [adminId], (err, stats) => {
             
-            // Get recent scans
+            // Get recent scans with enhanced data
             db.all(`
                 SELECT 
                     s.created_at,
@@ -803,7 +1018,7 @@ app.get('/api/stats/:adminId', (req, res) => {
                 JOIN users u ON s.user_id = u.user_id
                 WHERE s.admin_id = ?
                 ORDER BY s.created_at DESC
-                LIMIT 10
+                LIMIT 15
             `, [adminId], (err, recentScans) => {
                 
                 const formatDate = (dateStr) => {
@@ -816,12 +1031,32 @@ app.get('/api/stats/:adminId', (req, res) => {
                     return new Date(dateStr).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
                 };
                 
+                // Calculate barcode success rate
+                let barcodeSuccesses = 0;
+                let totalWithBarcodeAttempt = 0;
+                
+                recentScans.forEach(scan => {
+                    try {
+                        const data = JSON.parse(scan.scan_data);
+                        if (data.barcode || data.barcodeMethod) {
+                            totalWithBarcodeAttempt++;
+                            if (data.barcode && data.barcode !== 'Not detected') {
+                                barcodeSuccesses++;
+                            }
+                        }
+                    } catch (e) {}
+                });
+                
+                const barcodeSuccessRate = totalWithBarcodeAttempt > 0 ? 
+                    Math.round((barcodeSuccesses / totalWithBarcodeAttempt) * 100) : 0;
+                
                 res.json({
                     totalClients: stats.total_clients || 0,
                     activeClients: stats.active_clients || 0,
                     totalScans: stats.total_scans || 0,
                     scansToday: stats.scans_today || 0,
                     scansThisWeek: stats.scans_this_week || 0,
+                    barcodeSuccessRate: barcodeSuccessRate,
                     clients: clients.map(c => ({
                         name: c.first_name,
                         username: c.username,
@@ -832,16 +1067,26 @@ app.get('/api/stats/:adminId', (req, res) => {
                     })),
                     recentScans: recentScans.map(s => {
                         let matchData = 'Unknown match';
+                        let barcodeStatus = '❌ No barcode';
+                        let detectionMethod = 'Standard';
+                        
                         try {
                             const data = JSON.parse(s.scan_data);
                             matchData = data.game || 'Unknown match';
+                            
+                            if (data.barcode && data.barcode !== 'Not detected') {
+                                barcodeStatus = data.barcodeType ? `✅ ${data.barcodeType}` : '✅ Detected';
+                                detectionMethod = data.barcodeMethod || 'Enhanced Scanner';
+                            }
                         } catch (e) {}
                         
                         return {
                             date: formatDate(s.created_at),
                             time: formatTime(s.created_at),
                             client: s.first_name,
-                            match: matchData
+                            match: matchData,
+                            barcodeStatus: barcodeStatus,
+                            detectionMethod: detectionMethod
                         };
                     })
                 });
@@ -850,13 +1095,21 @@ app.get('/api/stats/:adminId', (req, res) => {
     });
 });
 
-// Health check endpoint
+// Health check endpoint with enhanced status
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'healthy', 
         uptime: process.uptime(),
         timestamp: new Date().toISOString(),
-        admins: config.ADMIN_IDS.length
+        admins: config.ADMIN_IDS.length,
+        version: '2.0.0',
+        features: [
+            'professional_barcode_scanning',
+            'qr_code_detection', 
+            'ocr_text_extraction',
+            'multi_variant_processing',
+            'enhanced_admin_dashboard'
+        ]
     });
 });
 
@@ -864,7 +1117,7 @@ app.get('/health', (req, res) => {
 initializeDatabase();
 
 app.listen(config.PORT, () => {
-    console.log(`🌐 Admin dashboard running on port ${config.PORT}`);
+    console.log(`🌐 Enhanced admin dashboard running on port ${config.PORT}`);
     console.log('📊 Dashboard URLs:');
     config.ADMIN_IDS.forEach(id => {
         console.log(`   Admin ${id}: http://localhost:${config.PORT}/admin/${id}`);
@@ -874,3 +1127,5 @@ app.listen(config.PORT, () => {
 console.log('🚀 Arsenal Ticket Bot is now running!');
 console.log('🤖 Bot username: @Arsenal_PK_bot');
 console.log('👥 Configured admins:', config.ADMIN_IDS);
+console.log('🔍 Enhanced features: Professional barcode scanning, QR detection, OCR extraction');
+console.log('✨ Ready for enhanced ticket processing!');

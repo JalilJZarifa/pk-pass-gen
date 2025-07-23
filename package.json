@@ -1,19 +1,19 @@
 {
   "name": "arsenal-ticket-bot",
-  "version": "1.0.0",
-  "description": "Arsenal FC Ticket Scanner Bot",
+  "version": "2.0.0",
+  "description": "Arsenal FC Ticket Scanner Bot with Enhanced Barcode Scanning",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
     "dev": "nodemon bot.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "jsqr": "^1.4.0",
-    "node-fetch": "^2.7.0",
     "node-telegram-bot-api": "^0.64.0",
-    "sharp": "^0.34.3",
+    "express": "^4.18.2",
     "sqlite3": "^5.1.6",
-    "tesseract.js": "^6.0.1"
+    "node-fetch": "^2.7.0",
+    "sharp": "^0.33.0",
+    "tesseract.js": "^5.0.0",
+    "jsqr": "^1.4.0"
   }
 }
