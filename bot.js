@@ -19,7 +19,7 @@ const bot = new TelegramBot(config.TELEGRAM_BOT_TOKEN, { polling: true });
 const app = express();
 const db = new sqlite3.Database(config.DATABASE_PATH);
 
-console.log('🤖 Arsenal Ticket Bot Starting...');
+console.log('🤖 Arsenal Ticket Bot Starting... (Updated from VS Code!)');
 console.log('👥 Admins:', config.ADMIN_IDS);
 
 // Database setup
