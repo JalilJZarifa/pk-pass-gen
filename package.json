@@ -1,7 +1,7 @@
 {
   "name": "arsenal-ticket-bot",
-  "version": "2.0.0",
-  "description": "Arsenal FC Ticket Scanner Bot with Enhanced Barcode Scanning",
+  "version": "3.0.0",
+  "description": "Enhanced Arsenal Ticket Bot with Professional Barcode Scanning",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
@@ -15,7 +15,12 @@
     "sharp": "^0.33.0",
     "tesseract.js": "^5.0.0",
     "jsqr": "^1.4.0",
-    "quagga": "^0.12.1",
-    "javascript-barcode-reader": "^1.0.3"
-  }
+    "@zxing/library": "^0.21.3",
+    "javascript-barcode-reader": "^0.6.9"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "Your Name",
+  "license": "MIT"
 }

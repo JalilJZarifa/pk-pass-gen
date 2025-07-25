@@ -103,94 +103,105 @@ function logMessage(userId, messageText, messageType = 'text') {
            [userId, messageText, messageType]);
 }
 
-// ========== ENHANCED BARCODE SCANNING FUNCTIONS ==========
-
-// Enhanced barcode scanning with multiple libraries
+// Fixed Main Barcode Scanner Function (Replace your existing scanBarcodeFromImage function)
 async function scanBarcodeFromImage(imageBuffer) {
     try {
-        console.log('🔍 Starting multi-library barcode scan...');
+        console.log('🔍 Starting comprehensive barcode scan...');
         
-        // Method 1: QuaggaJS (Most reliable for traditional barcodes)
-        const quaggaResult = await scanWithQuagga(imageBuffer);
-        if (quaggaResult) {
-            return {
-                type: 'BARCODE',
-                data: quaggaResult.code,
-                format: quaggaResult.format,
-                method: 'QuaggaJS Scanner'
-            };
+        // Validate input
+        if (!imageBuffer || imageBuffer.length === 0) {
+            console.error('❌ Invalid image buffer provided');
+            return null;
         }
 
-        // Method 2: javascript-barcode-reader
-        const jsBarcodeResult = await scanWithJavaScriptBarcodeReader(imageBuffer);
-        if (jsBarcodeResult) {
-            return {
-                type: 'BARCODE',
-                data: jsBarcodeResult.code,
-                format: jsBarcodeResult.format,
-                method: 'JavaScript Barcode Reader'
-            };
+        // Try all scanning methods with proper error handling
+        const scanningMethods = [
+            { name: 'QuaggaJS Scanner', method: scanWithQuagga },
+            { name: 'JavaScript Barcode Reader', method: scanWithJavaScriptBarcodeReader },
+            { name: 'jsQR Scanner', method: scanWithJsQR },
+            { name: 'Enhanced OCR Scanner', method: performBarcodeOCR }
+        ];
+
+        for (const scanner of scanningMethods) {
+            try {
+                console.log(`🔍 Trying ${scanner.name}...`);
+                
+                const result = await scanner.method(imageBuffer);
+                
+                if (result && (typeof result === 'string' || (result.code && result.code.length > 0))) {
+                    const barcodeData = typeof result === 'string' ? result : result.code;
+                    const format = result.format || 'Unknown';
+                    
+                    console.log(`✅ ${scanner.name} successfully detected barcode: ${barcodeData}`);
+                    
+                    return {
+                        type: scanner.name.includes('QR') ? 'QR_CODE' : 'BARCODE',
+                        data: barcodeData,
+                        format: format,
+                        method: scanner.name
+                    };
+                }
+                
+                console.log(`❌ ${scanner.name}: No barcode detected`);
+            } catch (error) {
+                console.error(`❌ ${scanner.name} error:`, error.message);
+                continue;
+            }
         }
 
-        // Method 3: jsQR for QR codes
-        const qrResult = await scanWithJsQR(imageBuffer);
-        if (qrResult) {
-            return {
-                type: 'QR_CODE',
-                data: qrResult,
-                method: 'jsQR Scanner'
-            };
-        }
-
-        // Method 4: Enhanced OCR with barcode patterns
-        const ocrResult = await performBarcodeOCR(imageBuffer);
-        if (ocrResult) {
-            return {
-                type: 'BARCODE_OCR',
-                data: ocrResult,
-                method: 'Enhanced OCR Scanner'
-            };
-        }
-
-        // Method 5: Try image variants if all else fails
+        // Try with image variants if all primary methods fail
+        console.log('🔍 Trying image enhancement variants...');
         const variantResult = await scanImageVariants(imageBuffer);
         if (variantResult) {
             return variantResult;
         }
 
-        console.log('❌ No barcode found with any method');
+        console.log('❌ All barcode scanning methods failed');
         return null;
 
     } catch (error) {
-        console.error('❌ Barcode scanning error:', error);
+        console.error('❌ Main barcode scanning error:', error);
         return null;
     }
 }
 
-// QuaggaJS Implementation (Best for traditional barcodes)
+// Fixed QuaggaJS Implementation (Replace your existing scanWithQuagga function)
 async function scanWithQuagga(imageBuffer) {
     return new Promise((resolve) => {
         try {
-            // Process image for QuaggaJS
+            console.log('🔍 Starting QuaggaJS scan...');
+            
+            // Process image for QuaggaJS with better preprocessing
             sharp(imageBuffer)
-                .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
+                .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
                 .grayscale()
                 .normalize()
+                .sharpen()
                 .png()
                 .toBuffer()
                 .then(processedBuffer => {
-                    // Save temporarily for QuaggaJS (it needs file path)
+                    // Create temp directory if it doesn't exist
                     const tempDir = path.join(__dirname, 'temp');
-                    const tempPath = path.join(tempDir, `barcode_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.png`);
-                    
-                    // Ensure temp directory exists
                     if (!fs.existsSync(tempDir)) {
                         fs.mkdirSync(tempDir, { recursive: true });
                     }
                     
+                    // Save temporarily for QuaggaJS (it needs file path in Node.js)
+                    const tempPath = path.join(tempDir, `barcode_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.png`);
                     fs.writeFileSync(tempPath, processedBuffer);
 
-                    Quagga.decodeSingle({
+                    // Proper QuaggaJS configuration for Node.js
+                    const config = {
+                        src: tempPath,
+                        numOfWorkers: 0, // CRITICAL: Must be 0 for Node.js
+                        inputStream: {
+                            size: 1200, // Max width/height
+                            singleChannel: false
+                        },
+                        locator: {
+                            patchSize: "medium",
+                            halfSample: true
+                        },
                         decoder: {
                             readers: [
                                 "code_128_reader",
@@ -206,10 +217,11 @@ async function scanWithQuagga(imageBuffer) {
                                 "code_93_reader"
                             ]
                         },
-                        locate: true, // Enable barcode localization
-                        numOfWorkers: 0, // Required for Node.js
-                        src: tempPath
-                    }, function(result) {
+                        locate: true // Enable barcode localization
+                    };
+
+                    // Use decodeSingle for Node.js file-based scanning
+                    Quagga.decodeSingle(config, (result) => {
                         // Clean up temp file
                         try {
                             fs.unlinkSync(tempPath);
@@ -217,11 +229,11 @@ async function scanWithQuagga(imageBuffer) {
                             console.log('Could not delete temp file:', e.message);
                         }
                         
-                        if (result && result.codeResult) {
+                        if (result && result.codeResult && result.codeResult.code) {
                             console.log('✅ QuaggaJS detected barcode:', result.codeResult.code);
                             resolve({
                                 code: result.codeResult.code,
-                                format: result.codeResult.format
+                                format: result.codeResult.format || 'Unknown'
                             });
                         } else {
                             console.log('❌ QuaggaJS: No barcode detected');
@@ -230,7 +242,7 @@ async function scanWithQuagga(imageBuffer) {
                     });
                 })
                 .catch(error => {
-                    console.error('QuaggaJS processing error:', error);
+                    console.error('QuaggaJS image processing error:', error);
                     resolve(null);
                 });
         } catch (error) {
@@ -240,45 +252,72 @@ async function scanWithQuagga(imageBuffer) {
     });
 }
 
-// JavaScript Barcode Reader Implementation  
+// Fixed JavaScript Barcode Reader Implementation (Replace your existing scanWithJavaScriptBarcodeReader function)
 async function scanWithJavaScriptBarcodeReader(imageBuffer) {
     try {
-        // Convert image to format expected by javascript-barcode-reader
+        console.log('🔍 Starting JavaScript Barcode Reader scan...');
+        
+        // Process image to proper format for javascript-barcode-reader
         const { data, info } = await sharp(imageBuffer)
-            .resize(400, 300, { fit: 'inside', withoutEnlargement: true })
+            .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
             .grayscale()
+            .normalize()
+            .threshold(128) // Binary threshold for better contrast
             .raw()
             .toBuffer({ resolveWithObject: true });
 
-        const readers = [
-            BarcodeReader.DecoderType.code_128,
-            BarcodeReader.DecoderType.code_39,
-            BarcodeReader.DecoderType.code_93,
-            BarcodeReader.DecoderType.codabar,
-            BarcodeReader.DecoderType.ean_13,
-            BarcodeReader.DecoderType.ean_8,
-            BarcodeReader.DecoderType.std25,
-            BarcodeReader.DecoderType.int25
+        // Convert to Uint8ClampedArray as expected by the library
+        const imageData = {
+            data: new Uint8ClampedArray(data),
+            width: info.width,
+            height: info.height
+        };
+
+        // Try different barcode types one by one
+        const barcodeTypes = [
+            'code-128',
+            'code-39', 
+            'code-93',
+            'codabar',
+            'ean-13',
+            'ean-8',
+            'code-2of5',  // Standard 2 of 5
+            'inter25'     // Interleaved 2 of 5
         ];
 
-        for (const readerType of readers) {
+        for (const barcodeType of barcodeTypes) {
             try {
-                const result = BarcodeReader.decodeBarcode(data, info.width, info.height, readerType);
+                console.log(`🔍 Trying ${barcodeType}...`);
+                
+                // Use the correct import and function call
+                const javascriptBarcodeReader = require('javascript-barcode-reader');
+                
+                const result = await javascriptBarcodeReader({
+                    image: imageData,
+                    barcode: barcodeType,
+                    options: {
+                        useAdaptiveThreshold: true, // Better for varied lighting
+                        singlePass: false // More thorough scanning
+                    }
+                });
+                
                 if (result) {
                     console.log('✅ JavaScript Barcode Reader detected:', result);
                     return {
                         code: result,
-                        format: readerType
+                        format: barcodeType
                     };
                 }
             } catch (e) {
-                // Try next reader type
+                // Continue to next barcode type
+                console.log(`❌ ${barcodeType} failed:`, e.message);
                 continue;
             }
         }
 
-        console.log('❌ JavaScript Barcode Reader: No barcode detected');
+        console.log('❌ JavaScript Barcode Reader: No barcode detected with any type');
         return null;
+        
     } catch (error) {
         console.error('JavaScript Barcode Reader error:', error);
         return null;
@@ -286,91 +325,191 @@ async function scanWithJavaScriptBarcodeReader(imageBuffer) {
 }
 
 // jsQR Implementation (for QR codes)
+// Fixed jsQR Implementation (Replace your existing scanWithJsQR function)
 async function scanWithJsQR(imageBuffer) {
     try {
-        // Convert to proper format for jsQR
-        const { data, info } = await sharp(imageBuffer)
-            .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
+        console.log('🔍 Starting jsQR scan...');
+        
+        // Process image for optimal QR code detection
+        let processedImage = await sharp(imageBuffer)
+            .resize(1000, 1000, { fit: 'inside', withoutEnlargement: true })
             .grayscale()
             .normalize()
             .png()
+            .toBuffer();
+
+        // Convert to ImageData format expected by jsQR
+        const { data, info } = await sharp(processedImage)
             .raw()
             .toBuffer({ resolveWithObject: true });
 
-        const qrResult = jsQR(new Uint8ClampedArray(data), info.width, info.height);
+        // jsQR expects RGBA format, so we need to convert grayscale to RGBA
+        const rgbaData = new Uint8ClampedArray(info.width * info.height * 4);
+        for (let i = 0; i < data.length; i++) {
+            const grayValue = data[i];
+            const rgbaIndex = i * 4;
+            rgbaData[rgbaIndex] = grayValue;     // R
+            rgbaData[rgbaIndex + 1] = grayValue; // G
+            rgbaData[rgbaIndex + 2] = grayValue; // B
+            rgbaData[rgbaIndex + 3] = 255;       // A (fully opaque)
+        }
+
+        // Try scanning the main image
+        let qrResult = jsQR(rgbaData, info.width, info.height, {
+            inversionAttempts: "dontInvert" // Try different inversion strategies
+        });
         
         if (qrResult && qrResult.data) {
             console.log('✅ QR Code detected:', qrResult.data);
             return qrResult.data;
         }
 
+        // Try with inverted colors
+        console.log('🔍 Trying inverted image...');
+        const invertedImage = await sharp(imageBuffer)
+            .resize(1000, 1000, { fit: 'inside', withoutEnlargement: true })
+            .grayscale()
+            .normalize()
+            .negate() // Invert colors
+            .png()
+            .toBuffer();
+
+        const { data: invertedData, info: invertedInfo } = await sharp(invertedImage)
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+
+        const invertedRgbaData = new Uint8ClampedArray(invertedInfo.width * invertedInfo.height * 4);
+        for (let i = 0; i < invertedData.length; i++) {
+            const grayValue = invertedData[i];
+            const rgbaIndex = i * 4;
+            invertedRgbaData[rgbaIndex] = grayValue;     // R
+            invertedRgbaData[rgbaIndex + 1] = grayValue; // G
+            invertedRgbaData[rgbaIndex + 2] = grayValue; // B
+            invertedRgbaData[rgbaIndex + 3] = 255;       // A
+        }
+
+        qrResult = jsQR(invertedRgbaData, invertedInfo.width, invertedInfo.height, {
+            inversionAttempts: "attemptBoth"
+        });
+
+        if (qrResult && qrResult.data) {
+            console.log('✅ QR Code detected (inverted):', qrResult.data);
+            return qrResult.data;
+        }
+
         console.log('❌ jsQR: No QR code detected');
         return null;
+        
     } catch (error) {
         console.error('jsQR scanning error:', error);
         return null;
     }
 }
 
-// Enhanced OCR with barcode pattern recognition
+// Fixed Enhanced OCR Implementation (Replace your existing performBarcodeOCR function)
 async function performBarcodeOCR(imageBuffer) {
     let worker = null;
     try {
+        console.log('🔍 Starting Enhanced OCR scan...');
+        
         worker = await createWorker();
         
-        // Configure OCR for barcode text
+        // Configure OCR specifically for barcode text with optimized settings
         await worker.setParameters({
-            tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_',
-            tessedit_pageseg_mode: '8', // Single word
+            tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_*+',
+            tessedit_pageseg_mode: '6', // Uniform block of text (better for barcodes)
             tessedit_ocr_engine_mode: '1', // Neural nets LSTM
-            preserve_interword_spaces: '0'
+            preserve_interword_spaces: '0',
+            classify_enable_learning: '0',
+            textord_really_old_xheight: '1',
+            textord_minimum_height: '10'
         });
 
-        // Process image for better OCR
-        const processedImage = await sharp(imageBuffer)
-            .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
-            .grayscale()
-            .normalize()
-            .sharpen()
-            .threshold(128)
-            .png()
-            .toBuffer();
-
-        const { data: { text } } = await worker.recognize(processedImage);
-        
-        // Enhanced barcode pattern matching
-        const barcodePatterns = [
-            /[A-Z0-9]{12,}/g,        // Long alphanumeric sequences
-            /\d{13,}/g,              // Long numeric sequences (EAN-13, etc.)
-            /[A-Z]{2,}\d{10,}/g,     // Mixed patterns (letters + numbers)
-            /\d{8}[A-Z0-9]{4,}/g,    // Numeric + alphanumeric
-            /[0-9A-F]{16,}/g,        // Hexadecimal patterns
-            /\b[A-Z0-9]{10,}\b/g     // Word boundary patterns
-        ];
+        // Try multiple image preprocessing variants
+        const imageVariants = await Promise.all([
+            // Original with enhancement
+            sharp(imageBuffer)
+                .resize(1600, 1200, { fit: 'inside', withoutEnlargement: true })
+                .grayscale()
+                .normalize()
+                .sharpen()
+                .threshold(128)
+                .png()
+                .toBuffer(),
+            
+            // High contrast variant
+            sharp(imageBuffer)
+                .resize(1600, 1200, { fit: 'inside', withoutEnlargement: true })
+                .grayscale()
+                .modulate({ brightness: 1.2, contrast: 2.0 })
+                .threshold(100)
+                .png()
+                .toBuffer(),
+            
+            // Inverted variant
+            sharp(imageBuffer)
+                .resize(1600, 1200, { fit: 'inside', withoutEnlargement: true })
+                .grayscale()
+                .normalize()
+                .negate()
+                .threshold(128)
+                .png()
+                .toBuffer()
+        ]);
 
         let bestMatch = null;
         let maxLength = 0;
 
-        for (const pattern of barcodePatterns) {
-            const matches = text.match(pattern);
-            if (matches) {
-                for (const match of matches) {
-                    const cleanMatch = match.trim();
-                    if (cleanMatch.length > maxLength && cleanMatch.length >= 10) {
-                        bestMatch = cleanMatch;
-                        maxLength = cleanMatch.length;
+        // Try OCR on each variant
+        for (let i = 0; i < imageVariants.length; i++) {
+            try {
+                console.log(`🔍 OCR variant ${i + 1}...`);
+                
+                const { data: { text } } = await worker.recognize(imageVariants[i]);
+                console.log(`OCR result ${i + 1}:`, text);
+                
+                // Enhanced barcode pattern matching with better regex
+                const barcodePatterns = [
+                    /\b[A-Z0-9]{12,30}\b/g,         // Long alphanumeric sequences
+                    /\b\d{12,18}\b/g,               // Long numeric sequences (UPC, EAN)
+                    /\b[A-Z]{2,4}\d{8,20}\b/g,      // Mixed patterns (letters + numbers)
+                    /\b\d{8,12}[A-Z0-9]{2,8}\b/g,  // Numeric + alphanumeric
+                    /\b[0-9A-F]{16,32}\b/g,         // Hexadecimal patterns
+                    /\b[A-Z0-9*+-]{10,30}\b/g,      // Barcode with special characters
+                    /(?:^\s*|\s+)([A-Z0-9]{10,})\s*$/gm, // Full line patterns
+                    /\*[A-Z0-9+-]*\*/g              // Code 39 patterns with asterisks
+                ];
+
+                for (const pattern of barcodePatterns) {
+                    const matches = text.match(pattern);
+                    if (matches) {
+                        for (const match of matches) {
+                            const cleanMatch = match.trim().replace(/[^\w\-]/g, '');
+                            if (cleanMatch.length > maxLength && cleanMatch.length >= 8) {
+                                // Validate it looks like a real barcode
+                                if (!/^(.)\1{5,}$/.test(cleanMatch)) { // Not just repeated characters
+                                    bestMatch = cleanMatch;
+                                    maxLength = cleanMatch.length;
+                                    console.log(`✅ Found barcode pattern: ${cleanMatch} (variant ${i + 1})`);
+                                }
+                            }
+                        }
                     }
                 }
+            } catch (e) {
+                console.log(`OCR variant ${i + 1} failed:`, e.message);
+                continue;
             }
         }
 
         if (bestMatch) {
-            console.log('✅ Barcode pattern found via OCR:', bestMatch);
+            console.log('✅ Best barcode pattern found via OCR:', bestMatch);
             return bestMatch;
         }
 
-        console.log('❌ OCR: No barcode pattern detected');
+        console.log('❌ Enhanced OCR: No barcode pattern detected');
         return null;
+        
     } catch (error) {
         console.error('Enhanced OCR error:', error);
         return null;
@@ -381,54 +520,126 @@ async function performBarcodeOCR(imageBuffer) {
     }
 }
 
-// Try image variants if main scan fails
+// Fixed Image Variants Scanner (Replace your existing scanImageVariants function)
 async function scanImageVariants(imageBuffer) {
     try {
-        const variants = [
-            // High contrast
-            sharp(imageBuffer).normalize().modulate({ brightness: 1.3, contrast: 1.8 }).png().toBuffer(),
-            // Inverted colors
-            sharp(imageBuffer).negate().normalize().png().toBuffer(),
-            // Edge enhanced
-            sharp(imageBuffer).grayscale().convolve({
-                width: 3,
-                height: 3,
-                kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1]
-            }).png().toBuffer(),
-            // Sharpened
-            sharp(imageBuffer).sharpen({ sigma: 2 }).normalize().png().toBuffer()
-        ];
+        console.log('🔍 Creating enhanced image variants...');
+        
+        // Create more diverse image variants with better preprocessing
+        const variants = await Promise.all([
+            // Variant 1: High contrast with sharpening
+            sharp(imageBuffer)
+                .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
+                .grayscale()
+                .normalize()
+                .modulate({ brightness: 1.3, contrast: 2.5 })
+                .sharpen({ sigma: 1.5 })
+                .threshold(120)
+                .png()
+                .toBuffer(),
+            
+            // Variant 2: Inverted with enhancement
+            sharp(imageBuffer)
+                .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
+                .grayscale()
+                .negate()
+                .normalize()
+                .sharpen()
+                .png()
+                .toBuffer(),
+            
+            // Variant 3: Edge enhancement
+            sharp(imageBuffer)
+                .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
+                .grayscale()
+                .convolve({
+                    width: 3,
+                    height: 3,
+                    kernel: [-1, -1, -1, -1, 9, -1, -1, -1, -1]
+                })
+                .normalize()
+                .png()
+                .toBuffer(),
+            
+            // Variant 4: Blur then sharpen (helps with noisy images)
+            sharp(imageBuffer)
+                .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
+                .grayscale()
+                .blur(1)
+                .sharpen({ sigma: 3 })
+                .normalize()
+                .threshold(128)
+                .png()
+                .toBuffer(),
+            
+            // Variant 5: Morphological operations simulation
+            sharp(imageBuffer)
+                .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
+                .grayscale()
+                .modulate({ brightness: 0.8, contrast: 2.0 })
+                .threshold(100)
+                .png()
+                .toBuffer()
+        ]);
 
-        const processedImages = await Promise.all(variants);
-
-        for (let i = 0; i < processedImages.length; i++) {
+        // Try QuaggaJS and OCR on each variant
+        for (let i = 0; i < variants.length; i++) {
             console.log(`🔍 Scanning variant ${i + 1}...`);
             
-            // Try QuaggaJS on variant
-            const quaggaResult = await scanWithQuagga(processedImages[i]);
-            if (quaggaResult) {
-                return {
-                    type: 'BARCODE',
-                    data: quaggaResult.code,
-                    format: quaggaResult.format,
-                    method: `QuaggaJS Scanner (variant ${i + 1})`
-                };
-            }
+            try {
+                // Try QuaggaJS first (most reliable for traditional barcodes)
+                const quaggaResult = await scanWithQuagga(variants[i]);
+                if (quaggaResult && quaggaResult.code) {
+                    return {
+                        type: 'BARCODE',
+                        data: quaggaResult.code,
+                        format: quaggaResult.format,
+                        method: `QuaggaJS Scanner (variant ${i + 1})`
+                    };
+                }
 
-            // Try jsQR on variant
-            const qrResult = await scanWithJsQR(processedImages[i]);
-            if (qrResult) {
-                return {
-                    type: 'QR_CODE',
-                    data: qrResult,
-                    method: `jsQR Scanner (variant ${i + 1})`
-                };
+                // Try JavaScript Barcode Reader
+                const jsBarcodeResult = await scanWithJavaScriptBarcodeReader(variants[i]);
+                if (jsBarcodeResult && jsBarcodeResult.code) {
+                    return {
+                        type: 'BARCODE',
+                        data: jsBarcodeResult.code,
+                        format: jsBarcodeResult.format,
+                        method: `JavaScript Barcode Reader (variant ${i + 1})`
+                    };
+                }
+
+                // Try jsQR for QR codes
+                const qrResult = await scanWithJsQR(variants[i]);
+                if (qrResult) {
+                    return {
+                        type: 'QR_CODE',
+                        data: qrResult,
+                        method: `jsQR Scanner (variant ${i + 1})`
+                    };
+                }
+
+                // Try OCR as last resort
+                const ocrResult = await performBarcodeOCR(variants[i]);
+                if (ocrResult) {
+                    return {
+                        type: 'BARCODE_OCR',
+                        data: ocrResult,
+                        method: `Enhanced OCR Scanner (variant ${i + 1})`
+                    };
+                }
+                
+            } catch (error) {
+                console.error(`Variant ${i + 1} scanning error:`, error.message);
+                continue;
             }
         }
 
+        console.log('❌ All image variants failed to detect barcode');
         return null;
+        
     } catch (error) {
-        console.error('Variant scanning error:', error);
+        console.error('Image variant scanning error:', error);
         return null;
     }
 }
