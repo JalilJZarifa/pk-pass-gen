@@ -106,7 +106,7 @@ function logMessage(userId, messageText, messageType = 'text') {
 // Fixed Main Barcode Scanner Function (Replace your existing scanBarcodeFromImage function)
 async function scanBarcodeFromImage(imageBuffer) {
     try {
-        console.log('🔍 Starting comprehensive barcode scan...');
+        console.log('🔍 Starting SIMPLIFIED barcode scan with QuaggaJS only...');
         
         // Validate input
         if (!imageBuffer || imageBuffer.length === 0) {
@@ -114,89 +114,65 @@ async function scanBarcodeFromImage(imageBuffer) {
             return null;
         }
 
-        // Try all scanning methods with proper error handling
-        const scanningMethods = [
-            { name: 'QuaggaJS Scanner', method: scanWithQuagga },
-            { name: 'JavaScript Barcode Reader', method: scanWithJavaScriptBarcodeReader },
-            { name: 'jsQR Scanner', method: scanWithJsQR },
-            { name: 'Enhanced OCR Scanner', method: performBarcodeOCR }
-        ];
+        console.log('📏 Image buffer size:', imageBuffer.length, 'bytes');
 
-        for (const scanner of scanningMethods) {
-            try {
-                console.log(`🔍 Trying ${scanner.name}...`);
-                
-                const result = await scanner.method(imageBuffer);
-                
-                if (result && (typeof result === 'string' || (result.code && result.code.length > 0))) {
-                    const barcodeData = typeof result === 'string' ? result : result.code;
-                    const format = result.format || 'Unknown';
-                    
-                    console.log(`✅ ${scanner.name} successfully detected barcode: ${barcodeData}`);
-                    
-                    return {
-                        type: scanner.name.includes('QR') ? 'QR_CODE' : 'BARCODE',
-                        data: barcodeData,
-                        format: format,
-                        method: scanner.name
-                    };
-                }
-                
-                console.log(`❌ ${scanner.name}: No barcode detected`);
-            } catch (error) {
-                console.error(`❌ ${scanner.name} error:`, error.message);
-                continue;
-            }
+        // Try QuaggaJS only
+        const quaggaResult = await scanWithQuaggaSimplified(imageBuffer);
+        
+        if (quaggaResult && quaggaResult.code) {
+            console.log('✅ SUCCESS: QuaggaJS detected barcode:', quaggaResult.code);
+            return {
+                type: 'BARCODE',
+                data: quaggaResult.code,
+                format: quaggaResult.format || 'Unknown',
+                method: 'QuaggaJS Scanner'
+            };
         }
 
-        // Try with image variants if all primary methods fail
-        console.log('🔍 Trying image enhancement variants...');
-        const variantResult = await scanImageVariants(imageBuffer);
-        if (variantResult) {
-            return variantResult;
-        }
-
-        console.log('❌ All barcode scanning methods failed');
+        console.log('❌ QuaggaJS: No barcode detected');
         return null;
 
     } catch (error) {
-        console.error('❌ Main barcode scanning error:', error);
+        console.error('❌ Barcode scanning error:', error.message);
         return null;
     }
 }
 
+
 // Fixed QuaggaJS Implementation (Replace your existing scanWithQuagga function)
-async function scanWithQuagga(imageBuffer) {
+async function scanWithQuaggaSimplified(imageBuffer) {
     return new Promise((resolve) => {
         try {
-            console.log('🔍 Starting QuaggaJS scan...');
+            console.log('🔍 QuaggaJS: Starting scan...');
             
-            // Process image for QuaggaJS with better preprocessing
+            // Process image for QuaggaJS
             sharp(imageBuffer)
-                .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
+                .resize(800, 600, { fit: 'inside', withoutEnlargement: true })
                 .grayscale()
                 .normalize()
-                .sharpen()
                 .png()
                 .toBuffer()
                 .then(processedBuffer => {
-                    // Create temp directory if it doesn't exist
+                    console.log('📷 QuaggaJS: Image processed, size:', processedBuffer.length, 'bytes');
+                    
+                    // Create temp directory
                     const tempDir = path.join(__dirname, 'temp');
                     if (!fs.existsSync(tempDir)) {
+                        console.log('📁 Creating temp directory...');
                         fs.mkdirSync(tempDir, { recursive: true });
                     }
                     
-                    // Save temporarily for QuaggaJS (it needs file path in Node.js)
-                    const tempPath = path.join(tempDir, `barcode_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.png`);
+                    // Save temporary file
+                    const tempPath = path.join(tempDir, `barcode_${Date.now()}.png`);
                     fs.writeFileSync(tempPath, processedBuffer);
+                    console.log('💾 Temp file saved:', tempPath);
 
-                    // Proper QuaggaJS configuration for Node.js
+                    // QuaggaJS configuration for Node.js
                     const config = {
                         src: tempPath,
-                        numOfWorkers: 0, // CRITICAL: Must be 0 for Node.js
+                        numOfWorkers: 0, // CRITICAL for Node.js
                         inputStream: {
-                            size: 1200, // Max width/height
-                            singleChannel: false
+                            size: 800
                         },
                         locator: {
                             patchSize: "medium",
@@ -208,45 +184,52 @@ async function scanWithQuagga(imageBuffer) {
                                 "ean_reader", 
                                 "ean_8_reader",
                                 "code_39_reader",
-                                "code_39_vin_reader",
-                                "codabar_reader",
                                 "upc_reader",
-                                "upc_e_reader",
-                                "i2of5_reader",
-                                "2of5_reader",
-                                "code_93_reader"
+                                "i2of5_reader"
                             ]
                         },
-                        locate: true // Enable barcode localization
+                        locate: true
                     };
 
-                    // Use decodeSingle for Node.js file-based scanning
+                    console.log('⚙️ QuaggaJS: Starting decodeSingle...');
+
+                    // Use decodeSingle for Node.js
                     Quagga.decodeSingle(config, (result) => {
+                        console.log('📊 QuaggaJS: Callback received');
+                        
                         // Clean up temp file
                         try {
                             fs.unlinkSync(tempPath);
+                            console.log('🗑️ Temp file cleaned up');
                         } catch (e) {
-                            console.log('Could not delete temp file:', e.message);
+                            console.log('⚠️ Could not delete temp file:', e.message);
                         }
                         
-                        if (result && result.codeResult && result.codeResult.code) {
-                            console.log('✅ QuaggaJS detected barcode:', result.codeResult.code);
-                            resolve({
-                                code: result.codeResult.code,
-                                format: result.codeResult.format || 'Unknown'
-                            });
+                        if (result && result.codeResult) {
+                            console.log('🎯 QuaggaJS: Raw result:', JSON.stringify(result.codeResult, null, 2));
+                            
+                            if (result.codeResult.code) {
+                                console.log('✅ QuaggaJS: Barcode found:', result.codeResult.code);
+                                resolve({
+                                    code: result.codeResult.code,
+                                    format: result.codeResult.format || 'Unknown'
+                                });
+                            } else {
+                                console.log('❌ QuaggaJS: No code in result');
+                                resolve(null);
+                            }
                         } else {
-                            console.log('❌ QuaggaJS: No barcode detected');
+                            console.log('❌ QuaggaJS: No codeResult in callback');
                             resolve(null);
                         }
                     });
                 })
                 .catch(error => {
-                    console.error('QuaggaJS image processing error:', error);
+                    console.error('❌ QuaggaJS image processing error:', error.message);
                     resolve(null);
                 });
         } catch (error) {
-            console.error('QuaggaJS error:', error);
+            console.error('❌ QuaggaJS error:', error.message);
             resolve(null);
         }
     });
@@ -1600,7 +1583,7 @@ app.listen(config.PORT, () => {
         console.log(`   Admin ${id}: http://localhost:${config.PORT}/admin/${id}`);
     });
 });
-
+//beans
 console.log('🚀 Arsenal Ticket Bot is now running!');
 console.log('🤖 Bot username: @Arsenal_PK_bot');
 console.log('👥 Configured admins:', config.ADMIN_IDS);
