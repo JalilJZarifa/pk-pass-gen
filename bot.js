@@ -102,11 +102,130 @@ function logMessage(userId, messageText, messageType = 'text') {
     db.run("INSERT INTO messages (user_id, message_text, message_type) VALUES (?, ?, ?)", 
            [userId, messageText, messageType]);
 }
-
-// Fixed Main Barcode Scanner Function (Replace your existing scanBarcodeFromImage function)
+// ZXing-JS Implementation (Pure JavaScript - No Native Dependencies)
+async function scanWithZXing(imageBuffer) {
+    try {
+        const { MultiFormatReader, BarcodeFormat, DecodeHintType, RGBLuminanceSource, BinaryBitmap, HybridBinarizer } = require('@zxing/library');
+        
+        console.log('🔍 ZXing-JS: Starting pure JavaScript scan...');
+        
+        // Process image with Sharp
+        const { data, info } = await sharp(imageBuffer)
+            .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+        
+        console.log('📷 ZXing-JS: Image processed, dimensions:', info.width, 'x', info.height);
+        
+        // Convert to RGB format for ZXing
+        const rgbData = new Uint8ClampedArray(info.width * info.height * 3);
+        for (let i = 0; i < data.length; i += info.channels) {
+            const pixelIndex = (i / info.channels) * 3;
+            if (info.channels === 1) {
+                // Grayscale
+                rgbData[pixelIndex] = data[i];     // R
+                rgbData[pixelIndex + 1] = data[i]; // G
+                rgbData[pixelIndex + 2] = data[i]; // B
+            } else if (info.channels >= 3) {
+                // RGB or RGBA
+                rgbData[pixelIndex] = data[i];     // R
+                rgbData[pixelIndex + 1] = data[i + 1]; // G
+                rgbData[pixelIndex + 2] = data[i + 2]; // B
+            }
+        }
+        
+        // Create ZXing objects
+        const luminanceSource = new RGBLuminanceSource(rgbData, info.width, info.height);
+        const binaryBitmap = new BinaryBitmap(new HybridBinarizer(luminanceSource));
+        
+        // Configure barcode formats to detect
+        const hints = new Map();
+        const formats = [
+            BarcodeFormat.QR_CODE,
+            BarcodeFormat.CODE_128,
+            BarcodeFormat.CODE_39,
+            BarcodeFormat.EAN_13,
+            BarcodeFormat.EAN_8,
+            BarcodeFormat.UPC_A,
+            BarcodeFormat.UPC_E,
+            BarcodeFormat.CODABAR,
+            BarcodeFormat.ITF,
+            BarcodeFormat.CODE_93,
+            BarcodeFormat.DATA_MATRIX,
+            BarcodeFormat.PDF_417
+        ];
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
+        hints.set(DecodeHintType.TRY_HARDER, true);
+        
+        const reader = new MultiFormatReader();
+        
+        console.log('⚙️ ZXing-JS: Attempting barcode detection...');
+        
+        try {
+            const result = reader.decode(binaryBitmap, hints);
+            
+            if (result && result.getText()) {
+                console.log('✅ ZXing-JS: Barcode found:', result.getText());
+                return {
+                    data: result.getText(),
+                    format: result.getBarcodeFormat(),
+                    type: result.getBarcodeFormat() === BarcodeFormat.QR_CODE ? 'QR_CODE' : 'BARCODE'
+                };
+            }
+        } catch (decodeError) {
+            console.log('❌ ZXing-JS decode error:', decodeError.message);
+        }
+        
+        // Try with different image processing
+        console.log('🔍 ZXing-JS: Trying enhanced image processing...');
+        
+        const enhancedImage = await sharp(imageBuffer)
+            .resize(1600, 1200, { fit: 'inside', withoutEnlargement: true })
+            .grayscale()
+            .normalize()
+            .modulate({ brightness: 1.2, contrast: 1.8 })
+            .sharpen()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+        
+        // Convert enhanced image
+        const enhancedRgbData = new Uint8ClampedArray(enhancedImage.info.width * enhancedImage.info.height * 3);
+        for (let i = 0; i < enhancedImage.data.length; i++) {
+            const pixelIndex = i * 3;
+            enhancedRgbData[pixelIndex] = enhancedImage.data[i];     // R
+            enhancedRgbData[pixelIndex + 1] = enhancedImage.data[i]; // G
+            enhancedRgbData[pixelIndex + 2] = enhancedImage.data[i]; // B
+        }
+        
+        const enhancedLuminanceSource = new RGBLuminanceSource(enhancedRgbData, enhancedImage.info.width, enhancedImage.info.height);
+        const enhancedBinaryBitmap = new BinaryBitmap(new HybridBinarizer(enhancedLuminanceSource));
+        
+        try {
+            const enhancedResult = reader.decode(enhancedBinaryBitmap, hints);
+            
+            if (enhancedResult && enhancedResult.getText()) {
+                console.log('✅ ZXing-JS Enhanced: Barcode found:', enhancedResult.getText());
+                return {
+                    data: enhancedResult.getText(),
+                    format: enhancedResult.getBarcodeFormat(),
+                    type: enhancedResult.getBarcodeFormat() === BarcodeFormat.QR_CODE ? 'QR_CODE' : 'BARCODE'
+                };
+            }
+        } catch (enhancedDecodeError) {
+            console.log('❌ ZXing-JS enhanced decode error:', enhancedDecodeError.message);
+        }
+        
+        console.log('❌ ZXing-JS: No barcode detected with any method');
+        return null;
+        
+    } catch (error) {
+        console.error('❌ ZXing-JS error:', error);
+        return null;
+    }
+}
 async function scanBarcodeFromImage(imageBuffer) {
     try {
-        console.log('🔍 Starting SIMPLIFIED barcode scan with QuaggaJS only...');
+        console.log('🔍 Starting PURE JAVASCRIPT barcode scan with ZXing-JS...');
         
         // Validate input
         if (!imageBuffer || imageBuffer.length === 0) {
@@ -114,22 +233,22 @@ async function scanBarcodeFromImage(imageBuffer) {
             return null;
         }
 
-        console.log('📏 Image buffer size:', imageBuffer.length, 'bytes');
+        console.log('📏 Processing image buffer size:', imageBuffer.length, 'bytes');
 
-        // Try QuaggaJS only
-        const quaggaResult = await scanWithQuaggaSimplified(imageBuffer);
+        // Try ZXing-JS - Pure JavaScript, no native dependencies
+        const zxingResult = await scanWithZXing(imageBuffer);
         
-        if (quaggaResult && quaggaResult.code) {
-            console.log('✅ SUCCESS: QuaggaJS detected barcode:', quaggaResult.code);
+        if (zxingResult) {
+            console.log('✅ SUCCESS: ZXing-JS detected barcode:', zxingResult.data);
             return {
-                type: 'BARCODE',
-                data: quaggaResult.code,
-                format: quaggaResult.format || 'Unknown',
-                method: 'QuaggaJS Scanner'
+                type: zxingResult.type,
+                data: zxingResult.data,
+                format: zxingResult.format,
+                method: 'ZXing-JS Pure JavaScript Scanner'
             };
         }
 
-        console.log('❌ QuaggaJS: No barcode detected');
+        console.log('❌ ZXing-JS: No barcode detected');
         return null;
 
     } catch (error) {
@@ -138,6 +257,80 @@ async function scanBarcodeFromImage(imageBuffer) {
     }
 }
 
+
+async function scanWithDynamsoft(imageBuffer) {
+    return new Promise(async (resolve) => {
+        try {
+            const dbr = require('barcode4nodejs');
+            
+            console.log('🔍 Dynamsoft: Initializing enterprise scanner...');
+            
+            // Initialize with trial license (you'll get a real one)
+            dbr.initLicense("t0087pwAAABu4VoCESofHg5xKvib9S4107jVlek3wprZF0zn8g79dU0TKzqVBG9aPWuBPIiwp2YacwjwphW+MfbG/EkZJoMy6pauYzyGxN/46zMND/QYfeiGr;t0089pwAAAETJrrp2XCLmImbdCiITh3BKI+9axCU3IRVtSgi/KiGvRwL4aKDLiFj7SefCSwPrkd5a7CNvR2xW1w9AyIIBFNrgW116WmPZxNaNv+I3U8t6ATZ2IdI=;t0089pwAAAG9lutJnpGTk2gwfCmqSALXDjL9gtdWZgS+O6UCqi4ZhfDZxFnJflXBHWUTSGkCU0pOZaPU75Ec/FqH1OvznnkR8q1P1Ccazi8+Nv5qam9d2AjK2Ic4="); // Trial license
+            
+            console.log('📷 Dynamsoft: Processing image with enterprise algorithms...');
+            
+            // Create temp directory
+            const tempDir = path.join(__dirname, 'temp');
+            if (!fs.existsSync(tempDir)) {
+                console.log('📁 Creating temp directory...');
+                fs.mkdirSync(tempDir, { recursive: true });
+            }
+            
+            // Save image to temp file (Dynamsoft needs file path)
+            const tempPath = path.join(tempDir, `dynamsoft_${Date.now()}.png`);
+            
+            // Pre-process image for maximum accuracy
+            const processedImage = await sharp(imageBuffer)
+                .resize(2000, 1500, { fit: 'inside', withoutEnlargement: true })
+                .grayscale()
+                .normalize()
+                .sharpen()
+                .png()
+                .toBuffer();
+            
+            fs.writeFileSync(tempPath, processedImage);
+            console.log('💾 Dynamsoft: Temp file saved:', tempPath);
+
+            // Use Dynamsoft's industry-leading barcode detection
+            dbr.decodeFileAsync(tempPath, dbr.formats.ALL, function(err, results) {
+                // Clean up temp file
+                try {
+                    fs.unlinkSync(tempPath);
+                    console.log('🗑️ Temp file cleaned up');
+                } catch (e) {
+                    console.log('⚠️ Could not delete temp file:', e.message);
+                }
+                
+                if (err) {
+                    console.error('❌ Dynamsoft decoding error:', err);
+                    resolve(null);
+                    return;
+                }
+                
+                if (results && results.length > 0) {
+                    console.log('🎯 Dynamsoft: Raw results:', JSON.stringify(results, null, 2));
+                    
+                    // Sort by confidence/quality if available
+                    results.sort((a, b) => {
+                        // Prefer results with shorter decoding time (usually more accurate)
+                        return (a.time || 999) - (b.time || 999);
+                    });
+                    
+                    console.log(`✅ Dynamsoft: Found ${results.length} barcode(s)`);
+                    resolve(results);
+                } else {
+                    console.log('❌ Dynamsoft: No barcodes detected');
+                    resolve(null);
+                }
+            }, "");
+            
+        } catch (error) {
+            console.error('❌ Dynamsoft scanning error:', error.message);
+            resolve(null);
+        }
+    });
+}
 
 // Fixed QuaggaJS Implementation (Replace your existing scanWithQuagga function)
 async function scanWithQuaggaSimplified(imageBuffer) {
@@ -506,24 +699,22 @@ async function performBarcodeOCR(imageBuffer) {
 // Fixed Image Variants Scanner (Replace your existing scanImageVariants function)
 async function scanImageVariants(imageBuffer) {
     try {
-        console.log('🔍 Creating enhanced image variants...');
+        console.log('🔍 Creating image variants for ZXing-JS...');
         
-        // Create more diverse image variants with better preprocessing
-        const variants = await Promise.all([
-            // Variant 1: High contrast with sharpening
+        const variants = [
+            // Variant 1: High contrast
             sharp(imageBuffer)
-                .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
+                .resize(1600, 1200, { fit: 'inside', withoutEnlargement: true })
                 .grayscale()
                 .normalize()
-                .modulate({ brightness: 1.3, contrast: 2.5 })
-                .sharpen({ sigma: 1.5 })
-                .threshold(120)
+                .modulate({ brightness: 1.3, contrast: 2.2 })
+                .sharpen({ sigma: 2 })
                 .png()
                 .toBuffer(),
             
-            // Variant 2: Inverted with enhancement
+            // Variant 2: Inverted colors
             sharp(imageBuffer)
-                .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
+                .resize(1600, 1200, { fit: 'inside', withoutEnlargement: true })
                 .grayscale()
                 .negate()
                 .normalize()
@@ -531,9 +722,9 @@ async function scanImageVariants(imageBuffer) {
                 .png()
                 .toBuffer(),
             
-            // Variant 3: Edge enhancement
+            // Variant 3: Edge enhanced
             sharp(imageBuffer)
-                .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
+                .resize(1600, 1200, { fit: 'inside', withoutEnlargement: true })
                 .grayscale()
                 .convolve({
                     width: 3,
@@ -544,89 +735,46 @@ async function scanImageVariants(imageBuffer) {
                 .png()
                 .toBuffer(),
             
-            // Variant 4: Blur then sharpen (helps with noisy images)
+            // Variant 4: Threshold binary
             sharp(imageBuffer)
-                .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
+                .resize(1600, 1200, { fit: 'inside', withoutEnlargement: true })
                 .grayscale()
-                .blur(1)
-                .sharpen({ sigma: 3 })
                 .normalize()
                 .threshold(128)
                 .png()
-                .toBuffer(),
-            
-            // Variant 5: Morphological operations simulation
-            sharp(imageBuffer)
-                .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
-                .grayscale()
-                .modulate({ brightness: 0.8, contrast: 2.0 })
-                .threshold(100)
-                .png()
                 .toBuffer()
-        ]);
+        ];
 
-        // Try QuaggaJS and OCR on each variant
-        for (let i = 0; i < variants.length; i++) {
-            console.log(`🔍 Scanning variant ${i + 1}...`);
+        const processedVariants = await Promise.all(variants);
+
+        // Try ZXing-JS on each variant
+        for (let i = 0; i < processedVariants.length; i++) {
+            console.log(`🔍 ZXing-JS scanning variant ${i + 1}...`);
             
             try {
-                // Try QuaggaJS first (most reliable for traditional barcodes)
-                const quaggaResult = await scanWithQuagga(variants[i]);
-                if (quaggaResult && quaggaResult.code) {
+                const result = await scanWithZXing(processedVariants[i]);
+                if (result) {
                     return {
-                        type: 'BARCODE',
-                        data: quaggaResult.code,
-                        format: quaggaResult.format,
-                        method: `QuaggaJS Scanner (variant ${i + 1})`
+                        type: result.type,
+                        data: result.data,
+                        format: result.format,
+                        method: `ZXing-JS Scanner (variant ${i + 1})`
                     };
                 }
-
-                // Try JavaScript Barcode Reader
-                const jsBarcodeResult = await scanWithJavaScriptBarcodeReader(variants[i]);
-                if (jsBarcodeResult && jsBarcodeResult.code) {
-                    return {
-                        type: 'BARCODE',
-                        data: jsBarcodeResult.code,
-                        format: jsBarcodeResult.format,
-                        method: `JavaScript Barcode Reader (variant ${i + 1})`
-                    };
-                }
-
-                // Try jsQR for QR codes
-                const qrResult = await scanWithJsQR(variants[i]);
-                if (qrResult) {
-                    return {
-                        type: 'QR_CODE',
-                        data: qrResult,
-                        method: `jsQR Scanner (variant ${i + 1})`
-                    };
-                }
-
-                // Try OCR as last resort
-                const ocrResult = await performBarcodeOCR(variants[i]);
-                if (ocrResult) {
-                    return {
-                        type: 'BARCODE_OCR',
-                        data: ocrResult,
-                        method: `Enhanced OCR Scanner (variant ${i + 1})`
-                    };
-                }
-                
             } catch (error) {
-                console.error(`Variant ${i + 1} scanning error:`, error.message);
+                console.error(`ZXing-JS variant ${i + 1} error:`, error.message);
                 continue;
             }
         }
 
-        console.log('❌ All image variants failed to detect barcode');
+        console.log('❌ All ZXing-JS variants failed to detect barcode');
         return null;
         
     } catch (error) {
-        console.error('Image variant scanning error:', error);
+        console.error('ZXing-JS variant scanning error:', error);
         return null;
     }
 }
-
 // ========== END BARCODE SCANNING FUNCTIONS ==========
 
 // Bot command handlers
